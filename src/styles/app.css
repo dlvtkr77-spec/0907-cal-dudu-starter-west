@@ -86,6 +86,23 @@ body {
   border-color: #007bff;
 }
 
+.role-selector .btn-primary {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.role-selector .btn-secondary {
+  background: #6c757d;
+  color: white;
+  border-color: #6c757d;
+}
+
+.role-selector .btn-secondary:hover:not(:disabled) {
+  background: #5a6268;
+  border-color: #5a6268;
+}
+
 /* 표 스타일 */
 .slots-table {
   width: 100%;
