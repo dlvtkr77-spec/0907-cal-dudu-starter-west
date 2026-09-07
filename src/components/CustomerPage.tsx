@@ -5,13 +5,15 @@ import { OperationManager } from '../utils/operations';
 import { DatabaseManager } from '../utils/database';
 import { decideRequestStatus } from '../utils/decide';
 import { TIME_SLOTS } from '../utils/constants';
+import { supabaseRPC } from '../utils/supabaseRPC';
 
 interface CustomerPageProps {
   db: DatabaseManager;
   mode: 'local' | 'supabase';
+  userId?: string;
 }
 
-export const CustomerPage: React.FC<CustomerPageProps> = ({ db }) => {
+export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) => {
   const [customerId, setCustomerId] = useState<string>('C01');
   const [stage, setStage] = useState<'select' | 'confirm' | 'view' | 'reselect'>('select');
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
@@ -27,8 +29,12 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db }) => {
 
   // 초기 로드
   useEffect(() => {
-    loadData();
-  }, [customerId]);
+    if (mode === 'supabase' && userId) {
+      loadSupabaseData();
+    } else {
+      loadData();
+    }
+  }, [customerId, mode, userId]);
 
   const loadData = () => {
     const state = db.getState();
@@ -78,20 +84,100 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db }) => {
 
     try {
       const operationId = `submit-${customerId}-${Date.now()}`;
-      const result = await om.submitRequest(customerId, selectedSlots, operationId);
 
-      if (result.success) {
-        setSuccess('신청이 완료되었습니다!');
-        setSelectedSlots([]);
-        setStage('view');
-        setTimeout(() => loadData(), 500);
+      if (mode === 'supabase' && userId) {
+        const result = await supabaseRPC.submitRequest(userId, selectedSlots, operationId);
+        if (result.success) {
+          setSuccess('신청이 완료되었습니다!');
+          setSelectedSlots([]);
+          setStage('view');
+          setTimeout(() => loadSupabaseData(), 500);
+        } else {
+          setError(result.error || '신청 실패');
+        }
       } else {
-        setError(result.error || '신청 실패');
+        const result = await om.submitRequest(customerId, selectedSlots, operationId);
+        if (result.success) {
+          setSuccess('신청이 완료되었습니다!');
+          setSelectedSlots([]);
+          setStage('view');
+          setTimeout(() => loadData(), 500);
+        } else {
+          setError(result.error || '신청 실패');
+        }
       }
     } catch (err) {
       setError(String(err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSupabaseData = async () => {
+    try {
+      setError('');
+      const result = await supabaseRPC.getCustomerRequests(userId!);
+      if (!result.success) {
+        setError(`데이터 조회 실패: ${result.error}`);
+        return;
+      }
+
+      const slotsResult = await supabaseRPC.getSlots();
+      if (!slotsResult.success) {
+        setError(`슬롯 조회 실패: ${slotsResult.error}`);
+        return;
+      }
+
+      const slotsMap: Record<string, Slot> = {};
+      slotsResult.slots.forEach((s: any) => {
+        slotsMap[s.id] = {
+          id: s.id,
+          date: s.date,
+          timeLabel: s.time_label,
+          status: s.status,
+          confirmedAt: s.confirmed_at,
+          confirmedBy: s.confirmed_by,
+        };
+      });
+      setSlots(slotsMap);
+
+      const requests = result.requests.map((r: any) => ({
+        id: r.id,
+        customerId: r.customer_id,
+        version: r.version,
+        createdAt: r.created_at,
+        status: r.status,
+        confirmedSlotId: r.confirmed_slot_id,
+        confirmedAt: r.confirmed_at,
+      }));
+
+      const candidates = result.candidates.map((c: any) => ({
+        id: c.id,
+        requestId: c.request_id,
+        slotId: c.slot_id,
+        priority: c.priority,
+        version: c.version,
+        queueSeq: c.queue_seq,
+      }));
+
+      const customerRequestsView = requests.map((req: Request) => {
+        const reqCandidates = candidates.filter((c: Candidate) => c.requestId === req.id);
+        return {
+          request: req,
+          candidates: reqCandidates.sort((a, b) => a.priority - b.priority),
+          decision: decideRequestStatus(req, reqCandidates, slotsMap),
+        };
+      });
+
+      setCustomerRequests(customerRequestsView);
+      if (customerRequestsView.length === 0) {
+        setStage('select');
+      } else {
+        const latest = customerRequestsView[customerRequestsView.length - 1];
+        setStage(latest.request.status === 'needs_reselection' ? 'reselect' : 'view');
+      }
+    } catch (err) {
+      setError(`오류: ${String(err)}`);
     }
   };
 
@@ -108,20 +194,39 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db }) => {
     try {
       const latest = customerRequests[customerRequests.length - 1];
       const operationId = `reselect-${latest.request.id}-${Date.now()}`;
-      const result = await om.resubmitRequest(
-        customerId,
-        latest.request.id,
-        selectedSlots,
-        operationId
-      );
 
-      if (result.success) {
-        setSuccess('재선택이 완료되었습니다!');
-        setSelectedSlots([]);
-        setStage('view');
-        setTimeout(() => loadData(), 500);
+      if (mode === 'supabase' && userId) {
+        const result = await supabaseRPC.resubmitRequest(
+          userId,
+          latest.request.id,
+          selectedSlots,
+          operationId
+        );
+
+        if (result.success) {
+          setSuccess('재선택이 완료되었습니다!');
+          setSelectedSlots([]);
+          setStage('view');
+          setTimeout(() => loadSupabaseData(), 500);
+        } else {
+          setError(result.error || '재선택 실패');
+        }
       } else {
-        setError(result.error || '재선택 실패');
+        const result = await om.resubmitRequest(
+          customerId,
+          latest.request.id,
+          selectedSlots,
+          operationId
+        );
+
+        if (result.success) {
+          setSuccess('재선택이 완료되었습니다!');
+          setSelectedSlots([]);
+          setStage('view');
+          setTimeout(() => loadData(), 500);
+        } else {
+          setError(result.error || '재선택 실패');
+        }
       }
     } catch (err) {
       setError(String(err));

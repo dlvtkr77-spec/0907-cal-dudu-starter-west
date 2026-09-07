@@ -4,14 +4,16 @@ import type { Slot, Request, Candidate, OperationLog } from '../types';
 import { OperationManager } from '../utils/operations';
 import { DatabaseManager } from '../utils/database';
 import { TIME_SLOTS } from '../utils/constants';
+import { supabaseRPC } from '../utils/supabaseRPC';
 
 interface AdminPageProps {
   db: DatabaseManager;
   mode: 'local' | 'supabase';
+  userId?: string;
 }
 
-export const AdminPage: React.FC<AdminPageProps> = ({ db }) => {
-  const [adminId] = useState<string>('ADMIN001');
+export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
+  const [adminId] = useState<string>(userId || 'ADMIN001');
   const [slots, setSlots] = useState<Record<string, Slot>>({});
   const [requests, setRequests] = useState<
     Array<{ request: Request; candidates: Candidate[]; decision: any }>
@@ -27,8 +29,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db }) => {
 
   // 초기 로드
   useEffect(() => {
-    loadData();
-  }, []);
+    if (mode === 'supabase') {
+      loadSupabaseData();
+    } else {
+      loadData();
+    }
+  }, [mode]);
 
   const loadData = () => {
     const state = db.getState();
@@ -37,6 +43,86 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db }) => {
     setLogs(state.logs || []);
     setError('');
     setSuccess('');
+  };
+
+  const loadSupabaseData = async () => {
+    try {
+      setError('');
+      const result = await supabaseRPC.getAllRequests();
+      if (!result.success) {
+        setError(`데이터 조회 실패: ${result.error}`);
+        return;
+      }
+
+      const slotsResult = await supabaseRPC.getSlots();
+      if (!slotsResult.success) {
+        setError(`슬롯 조회 실패: ${slotsResult.error}`);
+        return;
+      }
+
+      const slotsMap: Record<string, Slot> = {};
+      slotsResult.slots.forEach((s: any) => {
+        slotsMap[s.id] = {
+          id: s.id,
+          date: s.date,
+          timeLabel: s.time_label,
+          status: s.status,
+          confirmedAt: s.confirmed_at,
+          confirmedBy: s.confirmed_by,
+        };
+      });
+      setSlots(slotsMap);
+
+      const requests = result.requests.map((r: any) => ({
+        id: r.id,
+        customerId: r.customer_id,
+        version: r.version,
+        createdAt: r.created_at,
+        status: r.status,
+        confirmedSlotId: r.confirmed_slot_id,
+        confirmedAt: r.confirmed_at,
+      }));
+
+      const candidates = result.candidates.map((c: any) => ({
+        id: c.id,
+        requestId: c.request_id,
+        slotId: c.slot_id,
+        priority: c.priority,
+        version: c.version,
+        queueSeq: c.queue_seq,
+      }));
+
+      const adminRequests = requests
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .map((req: Request) => {
+          const reqCandidates = candidates.filter((c: Candidate) => c.requestId === req.id);
+          return {
+            request: req,
+            candidates: reqCandidates.sort((a, b) => a.priority - b.priority),
+            decision: { isValid: true },
+          };
+        });
+
+      setRequests(adminRequests);
+
+      const logsResult = await supabaseRPC.getLogs();
+      if (logsResult.success) {
+        setLogs(
+          logsResult.logs.map((l: any) => ({
+            id: l.id,
+            timestamp: l.timestamp,
+            action: l.action,
+            requestId: l.request_id,
+            adminId: l.admin_id,
+            slotId: l.slot_id,
+            status: l.status,
+            error: l.error_message,
+          }))
+        );
+      }
+    } catch (err) {
+      setError(`오류: ${String(err)}`);
+    }
   };
 
   const handleConfirm = async () => {
@@ -51,20 +137,39 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db }) => {
 
     try {
       const operationId = `confirm-${selectedRequest}-${selectedSlotForConfirm}-${Date.now()}`;
-      const result = await om.confirmRequest(
-        selectedRequest,
-        selectedSlotForConfirm,
-        adminId,
-        operationId
-      );
 
-      if (result.success) {
-        setSuccess(`확정되었습니다! 영향받은 요청: ${result.affectedRequests?.length || 0}건`);
-        setSelectedRequest(null);
-        setSelectedSlotForConfirm(null);
-        setTimeout(() => loadData(), 500);
+      if (mode === 'supabase') {
+        const result = await supabaseRPC.confirmRequest(
+          selectedRequest,
+          selectedSlotForConfirm,
+          adminId,
+          operationId
+        );
+
+        if (result.success) {
+          setSuccess(`확정되었습니다!`);
+          setSelectedRequest(null);
+          setSelectedSlotForConfirm(null);
+          setTimeout(() => loadSupabaseData(), 500);
+        } else {
+          setError(result.error || '확정 실패');
+        }
       } else {
-        setError(result.error || '확정 실패');
+        const result = await om.confirmRequest(
+          selectedRequest,
+          selectedSlotForConfirm,
+          adminId,
+          operationId
+        );
+
+        if (result.success) {
+          setSuccess(`확정되었습니다! 영향받은 요청: ${result.affectedRequests?.length || 0}건`);
+          setSelectedRequest(null);
+          setSelectedSlotForConfirm(null);
+          setTimeout(() => loadData(), 500);
+        } else {
+          setError(result.error || '확정 실패');
+        }
       }
     } catch (err) {
       setError(String(err));
