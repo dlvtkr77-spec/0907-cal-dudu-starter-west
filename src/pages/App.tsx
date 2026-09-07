@@ -54,8 +54,7 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginLeft: '20px' }}>
-            <span className={`mode-badge ${mode}`}>{mode === 'local' ? '로컬 모드' : 'Supabase 모드'}</span>
+          {mode === 'local' && (
             <button
               className="btn btn-secondary"
               onClick={handleResetData}
@@ -63,7 +62,7 @@ const App: React.FC = () => {
             >
               데이터 초기화
             </button>
-          </div>
+          )}
         </div>
       </div>
 
@@ -81,8 +80,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {role === 'customer' && <CustomerPage db={db} mode={mode} />}
-      {role === 'admin' && <AdminPage db={db} mode={mode} />}
+      {role === 'customer' && <CustomerPage db={db} mode={mode} userId={mode === 'local' ? 'C01' : undefined} />}
+      {role === 'admin' && <AdminPage db={db} mode={mode} userId={mode === 'local' ? 'ADMIN001' : undefined} />}
 
       <hr style={{ margin: '40px 0', borderColor: '#ddd' }} />
       <div style={{ fontSize: '12px', color: '#666', textAlign: 'center', paddingBottom: '20px' }}>
