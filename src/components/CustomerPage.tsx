@@ -324,6 +324,19 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db }) => {
               )}
             </div>
           ))}
+
+          {customerRequests.length > 0 && customerRequests[customerRequests.length - 1].request.status === 'confirmed' && (
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setStage('select');
+                setSelectedSlots([]);
+              }}
+              style={{ marginTop: '20px' }}
+            >
+              새로 신청하기
+            </button>
+          )}
         </div>
       )}
 
