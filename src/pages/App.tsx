@@ -440,11 +440,6 @@ const App: React.FC = () => {
         </>
       )}
 
-      <hr style={{ margin: '40px 0', borderColor: '#ddd' }} />
-      <div style={{ fontSize: '12px', color: '#666', textAlign: 'center', paddingBottom: '20px' }}>
-        <p>cal.dudu-works.com v1.0 - 수업용 기본 실습 앱</p>
-        <p>기본값: 42슬롯(14일 × 3시간대), 고객 1-3개 희망, 어드민 수동 확정</p>
-      </div>
     </div>
   );
 };
