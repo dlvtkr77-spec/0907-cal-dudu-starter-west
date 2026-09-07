@@ -5,12 +5,37 @@ import { OperationManager } from '../utils/operations';
 import { DatabaseManager } from '../utils/database';
 import { TIME_SLOTS } from '../utils/constants';
 import { supabaseRPC } from '../utils/supabaseRPC';
+import {
+  countAdminRequestStatuses,
+  filterAdminRequests,
+  getFirstReceivedRequestId,
+  getEarliestCandidateTime,
+  sortAdminRequests,
+  type AdminStatusFilter,
+} from '../utils/adminPriority';
+import {
+  getOperationActionLabel,
+  getOperationErrorStage,
+  sortOperationLogsNewestFirst,
+} from '../utils/operationLogDisplay';
 
 interface AdminPageProps {
   db: DatabaseManager;
   mode: 'local' | 'supabase';
   userId?: string;
 }
+
+const getUrgencyLabel = (candidates: Candidate[], slots: Record<string, Slot>) => {
+  const earliest = getEarliestCandidateTime(candidates, slots);
+  if (!Number.isFinite(earliest)) return null;
+
+  const days = Math.ceil((earliest - Date.now()) / (24 * 60 * 60 * 1000));
+  if (days < 0) return { text: '시간 경과', color: '#dc3545' };
+  if (days === 0) return { text: '오늘', color: '#dc3545' };
+  if (days === 1) return { text: 'D-1', color: '#dc3545' };
+  if (days <= 3) return { text: `D-${days}`, color: '#fd7e14' };
+  return { text: `D-${days}`, color: '#6c757d' };
+};
 
 export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
   const [adminId] = useState<string>(userId || 'ADMIN001');
@@ -24,6 +49,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('received');
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
   const om = new OperationManager(db);
 
@@ -38,9 +65,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
 
   const loadData = () => {
     const state = db.getState();
+    const adminRequests = sortAdminRequests(om.getAdminRequests(), state.slots);
     setSlots(state.slots);
-    setRequests(om.getAdminRequests());
+    setRequests(adminRequests);
+    setSelectedRequest(getFirstReceivedRequestId(adminRequests));
+    setSelectedSlotForConfirm(null);
     setLogs(state.logs || []);
+    setLastUpdatedAt(new Date());
     setError('');
     setSuccess('');
   };
@@ -92,34 +123,40 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
         queueSeq: c.queue_seq,
       }));
 
-      const adminRequests = requests
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-        .map((req: Request) => {
+      const adminRequests = sortAdminRequests(
+        requests.map((req: Request) => {
           const reqCandidates = candidates.filter((c: Candidate) => c.requestId === req.id);
           return {
             request: req,
             candidates: reqCandidates.sort((a, b) => a.priority - b.priority),
             decision: { isValid: true },
           };
-        });
+        }),
+        slotsMap
+      );
 
       setRequests(adminRequests);
+      setSelectedRequest(getFirstReceivedRequestId(adminRequests));
+      setSelectedSlotForConfirm(null);
 
       const logsResult = await supabaseRPC.getLogs();
       if (logsResult.success) {
         setLogs(
           logsResult.logs.map((l: any) => ({
             id: l.id,
+            operationId: l.operation_id,
             timestamp: l.timestamp,
             action: l.action,
-            requestId: l.request_id,
+            requestId: l.request_id || '',
             adminId: l.admin_id,
             slotId: l.slot_id,
             status: l.status,
+            errorStage: l.error_stage,
             error: l.error_message,
           }))
         );
       }
+      setLastUpdatedAt(new Date());
     } catch (err) {
       setError(`오류: ${String(err)}`);
     }
@@ -239,7 +276,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
     }
   };
 
+  const handleRefreshRequests = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      if (mode === 'supabase') await loadSupabaseData();
+      else loadData();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestCounts = countAdminRequestStatuses(requests);
+  const visibleRequests = filterAdminRequests(requests, statusFilter);
   const currentRequest = selectedRequest ? requests.find(r => r.request.id === selectedRequest) : null;
+
+  const statusFilters: Array<{ value: AdminStatusFilter; label: string }> = [
+    { value: 'all', label: '전체' },
+    { value: 'received', label: '접수됨' },
+    { value: 'needs_reselection', label: '재선택 필요' },
+    { value: 'confirmed', label: '확정됨' },
+  ];
 
   return (
     <div className="admin-page">
@@ -256,10 +315,46 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
       <div className="grid">
         {/* 요청 목록 */}
         <div>
-          <h3>신청 목록 (총 {requests.length}건)</h3>
+          <div className="admin-list-heading">
+            <div>
+              <h3>신청 목록 (총 {requests.length}건)</h3>
+              {lastUpdatedAt && (
+                <span>마지막 확인: {lastUpdatedAt.toLocaleTimeString()}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleRefreshRequests}
+              disabled={loading}
+            >
+              {loading ? '확인 중...' : '신청 목록 새로고침'}
+            </button>
+          </div>
+          <div className="admin-status-filters" aria-label="신청 상태 필터">
+            {statusFilters.map(filter => (
+              <button
+                key={filter.value}
+                type="button"
+                className={`btn ${statusFilter === filter.value ? 'btn-primary' : 'btn-secondary'}`}
+                aria-pressed={statusFilter === filter.value}
+                onClick={() => {
+                  setStatusFilter(filter.value);
+                  setSelectedRequest(null);
+                  setSelectedSlotForConfirm(null);
+                }}
+              >
+                {filter.label} {requestCounts[filter.value]}
+              </button>
+            ))}
+          </div>
           <div style={{ maxHeight: '500px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px' }}>
             <ul className="list" style={{ margin: 0 }}>
-              {requests.map((item, idx) => (
+              {visibleRequests.map((item, idx) => {
+                const urgency = item.request.status === 'confirmed'
+                  ? null
+                  : getUrgencyLabel(item.candidates, slots);
+                return (
                 <li
                   key={item.request.id}
                   onClick={() => {
@@ -290,9 +385,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                           ? '재선택필요'
                           : '접수됨'}
                     </span>
+                    {urgency && (
+                      <strong style={{ marginLeft: '8px', color: urgency.color, fontSize: '12px' }}>
+                        확인 {urgency.text}
+                      </strong>
+                    )}
                   </div>
                 </li>
-              ))}
+                );
+              })}
+              {visibleRequests.length === 0 && (
+                <li style={{ color: '#666', cursor: 'default' }}>해당 상태의 신청이 없습니다.</li>
+              )}
             </ul>
           </div>
         </div>
@@ -413,33 +517,44 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
               <tr>
                 <th>시간</th>
                 <th>행위</th>
-                <th>요청ID</th>
+                <th>고객</th>
                 <th>슬롯</th>
                 <th>결과</th>
+                <th>오류 위치</th>
                 <th>오류</th>
+                <th>작업 ID</th>
               </tr>
             </thead>
             <tbody>
-              {logs
-                .slice()
-                .reverse()
+              {sortOperationLogsNewestFirst(logs)
                 .slice(0, 20)
-                .map(log => (
+                .map(log => {
+                  const relatedRequest = requests.find(item => item.request.id === log.requestId);
+                  const slot = log.slotId ? slots[log.slotId] : undefined;
+                  const slotLabel = slot
+                    ? `${slot.date} ${TIME_SLOTS.find(item => item.label === slot.timeLabel)?.displayLabel || slot.timeLabel}`
+                    : log.slotId || '-';
+                  const errorStage = getOperationErrorStage(log);
+
+                  return (
                   <tr key={log.id} style={{ fontSize: '12px' }}>
                     <td>{new Date(log.timestamp).toLocaleString()}</td>
-                    <td>{log.action}</td>
-                    <td style={{ fontSize: '10px', fontFamily: 'monospace' }}>
-                      {log.requestId.substring(0, 8)}...
-                    </td>
-                    <td>{log.slotId ? log.slotId : '-'}</td>
+                    <td>{getOperationActionLabel(log.action)}</td>
+                    <td title={log.requestId || undefined}>{relatedRequest?.request.customerId || '-'}</td>
+                    <td>{slotLabel}</td>
                     <td>
                       <span style={{ color: log.status === 'success' ? '#28a745' : '#dc3545' }}>
                         {log.status === 'success' ? '성공' : '실패'}
                       </span>
                     </td>
-                    <td style={{ color: '#dc3545' }}>{log.error ? log.error.substring(0, 30) : '-'}</td>
+                    <td>{errorStage}</td>
+                    <td style={{ color: '#dc3545' }}>{log.error || '-'}</td>
+                    <td title={log.operationId || log.id} style={{ fontFamily: 'monospace' }}>
+                      {(log.operationId || log.id).slice(0, 12)}...
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
             </tbody>
           </table>
         </div>

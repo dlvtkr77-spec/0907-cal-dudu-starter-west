@@ -3,12 +3,32 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+const getTabAuthStorageKey = () => {
+  const tabIdKey = 'cal-dudu-auth-tab-id';
+  let tabId = window.sessionStorage.getItem(tabIdKey);
+
+  if (!tabId) {
+    tabId = crypto.randomUUID();
+    window.sessionStorage.setItem(tabIdKey, tabId);
+  }
+
+  return `cal-dudu-auth-${tabId}`;
+};
+
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase credentials not configured. Running in local mode only.');
 }
 
 export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storage: window.sessionStorage,
+        storageKey: getTabAuthStorageKey(),
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    })
   : null;
 
 export async function getCurrentUser() {

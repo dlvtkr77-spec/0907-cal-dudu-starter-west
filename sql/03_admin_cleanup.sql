@@ -54,16 +54,17 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Not authorized');
   END IF;
 
-  DELETE FROM public.confirmations;
-  DELETE FROM public.operation_logs;
-  DELETE FROM public.candidates;
-  DELETE FROM public.requests;
+  DELETE FROM public.confirmations WHERE TRUE;
+  DELETE FROM public.operation_logs WHERE TRUE;
+  DELETE FROM public.candidates WHERE TRUE;
+  DELETE FROM public.requests WHERE TRUE;
 
   UPDATE public.slots
   SET status = 'available',
       confirmed_by = NULL,
       confirmed_at = NULL,
-      updated_at = NOW();
+      updated_at = NOW()
+  WHERE TRUE;
 
   RETURN jsonb_build_object('success', true);
 END;

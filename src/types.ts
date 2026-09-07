@@ -32,12 +32,14 @@ export interface Candidate {
 // 운영 기록 (audit log)
 export interface OperationLog {
   id: string; // UUID, 재시도 식별용
+  operationId?: string; // 동일 작업 재시도 식별자
   timestamp: string; // ISO 8601
   action: 'submit' | 'confirm' | 'reselect';
-  requestId: string; // 영향받은 요청
+  requestId: string; // 영향받은 요청 (검사 단계 실패 시 빈 값)
   adminId?: string; // 어드민만 설정
   slotId?: string; // 확정한 슬롯
   status: 'success' | 'failed';
+  errorStage?: 'input_validation' | 'current_state' | 'save' | 'completed';
   error?: string; // 실패 이유
 }
 

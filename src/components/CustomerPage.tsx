@@ -6,6 +6,7 @@ import { DatabaseManager } from '../utils/database';
 import { decideRequestStatus } from '../utils/decide';
 import { TIME_SLOTS } from '../utils/constants';
 import { supabaseRPC } from '../utils/supabaseRPC';
+import { getCustomerStatusGuide } from '../utils/customerStatus';
 
 interface CustomerPageProps {
   db: DatabaseManager;
@@ -84,7 +85,8 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
     setSuccess('');
 
     try {
-      const operationId = `submit-${customerId}-${Date.now()}`;
+      const operationCustomerId = mode === 'supabase' ? (loginId || userId) : customerId;
+      const operationId = `submit-${operationCustomerId}-${Date.now()}`;
 
       if (mode === 'supabase' && userId) {
         const result = await supabaseRPC.submitRequest(userId, selectedSlots, operationId);
@@ -242,6 +244,22 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
     setError('');
   };
 
+  const refreshCustomerData = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      if (mode === 'supabase' && userId) {
+        await loadSupabaseData();
+      } else {
+        loadData();
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 슬롯 상태가 변경되었는지 확인
   const checkSlotAvailability = () => {
     if (stage === 'confirm' && customerRequests.length > 0) {
@@ -373,6 +391,26 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
       {customerRequests.length > 0 && (
         <div>
           <h3>{stage === 'view' ? '내 신청 현황' : '내 신청 목록'}</h3>
+          {stage === 'view' && (() => {
+            const latestRequest = customerRequests[customerRequests.length - 1].request;
+            const guide = getCustomerStatusGuide(latestRequest.status);
+
+            return (
+              <section className="status-guide" aria-live="polite">
+                <h4>{guide.heading}</h4>
+                <p>{guide.description}</p>
+                <p><strong>지금 할 일:</strong> {guide.nextAction}</p>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  onClick={refreshCustomerData}
+                  disabled={loading}
+                >
+                  {loading ? '확인 중...' : '현재 상태 다시 확인'}
+                </button>
+              </section>
+            );
+          })()}
           {customerRequests.map((item, idx) => (
             <div key={item.request.id} style={{ marginBottom: '20px', padding: '16px', background: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
               <h4>신청 #{item.request.version} (접수일: {new Date(item.request.createdAt).toLocaleString()})</h4>

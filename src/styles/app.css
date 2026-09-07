@@ -277,6 +277,50 @@ body {
   border-left-color: #ffc107;
 }
 
+.status-guide {
+  padding: 16px;
+  margin-bottom: 20px;
+  background: #f0f7ff;
+  border: 1px solid #9ec5fe;
+  border-radius: 4px;
+}
+
+.status-guide h4 {
+  margin: 0 0 8px;
+}
+
+.status-guide p {
+  margin: 0 0 10px;
+}
+
+.admin-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.admin-status-filters .btn {
+  padding: 8px 10px;
+}
+
+.admin-list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.admin-list-heading h3 {
+  margin-bottom: 4px;
+}
+
+.admin-list-heading span {
+  color: #666;
+  font-size: 12px;
+}
+
 /* 목록 */
 .list {
   list-style: none;
