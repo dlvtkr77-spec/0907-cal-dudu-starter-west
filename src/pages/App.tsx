@@ -3,12 +3,14 @@ import { CustomerPage } from '../components/CustomerPage';
 import { AdminPage } from '../components/AdminPage';
 import { DatabaseManager } from '../utils/database';
 import { REFERENCE_TIME } from '../utils/constants';
+import { supabase } from '../utils/supabaseClient';
 
 type Mode = 'local' | 'supabase';
 type Role = 'customer' | 'admin';
 
 const App: React.FC = () => {
-  const [mode] = useState<Mode>('local');
+  // .env에 Supabase 설정이 있으면 Supabase 모드 (기본값), 없으면 로컬 모드
+  const [mode] = useState<Mode>(supabase ? 'supabase' : 'local');
   const [role, setRole] = useState<Role>('customer');
   const [db] = useState(() => new DatabaseManager());
 
