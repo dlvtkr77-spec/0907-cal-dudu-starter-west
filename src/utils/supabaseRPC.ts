@@ -3,7 +3,7 @@ import { supabase } from './supabaseClient';
 export const supabaseRPC = {
   async submitRequest(customerId: string, slotIds: string[], operationId: string) {
     if (!supabase) {
-      return { success: false, error: 'Supabase not configured' };
+      return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
     }
 
     try {
@@ -25,7 +25,7 @@ export const supabaseRPC = {
 
   async confirmRequest(requestId: string, slotId: string, adminId: string, operationId: string) {
     if (!supabase) {
-      return { success: false, error: 'Supabase not configured' };
+      return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
     }
 
     try {
@@ -48,7 +48,7 @@ export const supabaseRPC = {
 
   async resubmitRequest(customerId: string, requestId: string, slotIds: string[], operationId: string) {
     if (!supabase) {
-      return { success: false, error: 'Supabase not configured' };
+      return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
     }
 
     try {
@@ -175,6 +175,32 @@ export const supabaseRPC = {
       return { success: true, logs: data || [] };
     } catch (err) {
       return { success: false, logs: [], error: String(err) };
+    }
+  },
+
+  async deleteRequest(requestId: string) {
+    if (!supabase) return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
+
+    try {
+      const { data, error } = await supabase.rpc('admin_delete_request', {
+        p_request_id: requestId,
+      });
+      if (error) return { success: false, error: error.message };
+      return data;
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  },
+
+  async resetAllData() {
+    if (!supabase) return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
+
+    try {
+      const { data, error } = await supabase.rpc('admin_reset_all_data');
+      if (error) return { success: false, error: error.message };
+      return data;
+    } catch (err) {
+      return { success: false, error: String(err) };
     }
   },
 };

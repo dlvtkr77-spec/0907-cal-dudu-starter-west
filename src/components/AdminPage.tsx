@@ -75,7 +75,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
 
       const requests = result.requests.map((r: any) => ({
         id: r.id,
-        customerId: r.customer_id,
+        customerId: r.customer_login_id || r.customer_id,
         version: r.version,
         createdAt: r.created_at,
         status: r.status,
@@ -178,11 +178,77 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
     }
   };
 
+  const handleDeleteRequest = async () => {
+    if (!selectedRequest || !window.confirm('선택한 접수건을 삭제하시겠습니까? 확정된 슬롯은 다시 활성화됩니다.')) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = mode === 'supabase'
+        ? await supabaseRPC.deleteRequest(selectedRequest)
+        : { success: db.deleteRequest(selectedRequest) };
+
+      if (!result.success) {
+        setError(('error' in result && result.error) || '접수건 삭제 실패');
+        return;
+      }
+
+      setSelectedRequest(null);
+      setSelectedSlotForConfirm(null);
+      setSuccess('접수건을 삭제했습니다.');
+      if (mode === 'supabase') await loadSupabaseData();
+      else loadData();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!window.confirm('모든 접수·후보·확정·실행 기록을 삭제하고 전체 슬롯을 초기화하시겠습니까?')) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      if (mode === 'supabase') {
+        const result = await supabaseRPC.resetAllData();
+        if (!result.success) {
+          setError(result.error || '전체 초기화 실패');
+          return;
+        }
+        await loadSupabaseData();
+      } else {
+        db.reset();
+        loadData();
+      }
+
+      setSelectedRequest(null);
+      setSelectedSlotForConfirm(null);
+      setSuccess('전체 예약 데이터를 초기화했습니다.');
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const currentRequest = selectedRequest ? requests.find(r => r.request.id === selectedRequest) : null;
 
   return (
     <div className="admin-page">
-      <h2>어드민 패널</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+        <h2>어드민 패널</h2>
+        <button className="btn btn-danger" onClick={handleResetAll} disabled={loading}>
+          전체 데이터 초기화
+        </button>
+      </div>
 
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
@@ -315,6 +381,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                   {loading ? '처리 중...' : '확정'}
                 </button>
               )}
+              <button
+                className="btn btn-danger"
+                onClick={handleDeleteRequest}
+                disabled={loading}
+                style={{ marginTop: '10px', width: '100%' }}
+              >
+                이 접수건 삭제
+              </button>
             </div>
           ) : (
             <div style={{ padding: '16px', background: '#f0f0f0', borderRadius: '4px', color: '#666' }}>

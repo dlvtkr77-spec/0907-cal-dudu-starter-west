@@ -3,7 +3,7 @@ import { CustomerPage } from '../components/CustomerPage';
 import { AdminPage } from '../components/AdminPage';
 import { DatabaseManager } from '../utils/database';
 import { REFERENCE_TIME } from '../utils/constants';
-import { supabase, getCurrentUser, getAdminStatus } from '../utils/supabaseClient';
+import { supabase, getCurrentUser } from '../utils/supabaseClient';
 
 type Mode = 'local' | 'supabase';
 type Role = 'customer' | 'admin';
@@ -15,31 +15,71 @@ interface AuthState {
   error: string;
 }
 
+const formatLoginError = (message: string) =>
+  message === 'Invalid login credentials'
+    ? '로그인 정보가 맞지 않습니다. 등록된 사용자 아이디와 비밀번호를 확인하세요.'
+    : message;
+
+const loginIdToEmail = (loginId: string) => `${loginId.trim().toLowerCase()}@test.com`;
+const getLoginPortalFromPath = (): Role =>
+  window.location.pathname.startsWith('/admin') ? 'admin' : 'customer';
+
 const App: React.FC = () => {
   // .env에 Supabase 설정이 있으면 Supabase 모드 (기본값), 없으면 로컬 모드
   const [mode] = useState<Mode>(supabase ? 'supabase' : 'local');
   const [role, setRole] = useState<Role>('customer');
   const [db] = useState(() => new DatabaseManager());
   const [auth, setAuth] = useState<AuthState>({ user: null, isAdmin: false, isLoading: true, error: '' });
-  const [loginEmail, setLoginEmail] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginPortal, setLoginPortal] = useState<Role>(getLoginPortalFromPath);
+  const isAdminAccountWithoutRole = auth.user?.email === 'admin@test.com' && !auth.isAdmin;
+
+  useEffect(() => {
+    if (window.location.pathname === '/') {
+      window.history.replaceState({}, '', '/customer/login');
+    }
+
+    const handlePopState = () => setLoginPortal(getLoginPortalFromPath());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateToLogin = (portal: Role) => {
+    window.history.pushState({}, '', portal === 'admin' ? '/admin/login' : '/customer/login');
+    setLoginPortal(portal);
+    setLoginId('');
+    setLoginPassword('');
+    setAuth(prev => ({ ...prev, error: '' }));
+  };
 
   // Supabase 모드에서 로그인 상태 확인
   useEffect(() => {
-    if (mode !== 'supabase' || !supabase) return;
+    if (mode !== 'supabase' || !supabase) {
+      setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
+      return;
+    }
+
+    let mounted = true;
 
     const checkAuth = async () => {
       try {
         const user = await getCurrentUser();
-        if (user) {
-          const isAdmin = await getAdminStatus();
-          setAuth({ user, isAdmin, isLoading: false, error: '' });
-        } else {
-          setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
+        if (mounted) {
+          if (user) {
+            const isAdmin = user.app_metadata?.role === 'admin';
+            setRole(isAdmin ? 'admin' : 'customer');
+            window.history.replaceState({}, '', isAdmin ? '/admin' : '/customer');
+            setAuth({ user, isAdmin, isLoading: false, error: '' });
+          } else {
+            setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
+          }
         }
       } catch (err) {
-        setAuth({ user: null, isAdmin: false, isLoading: false, error: String(err) });
+        if (mounted) {
+          setAuth({ user: null, isAdmin: false, isLoading: false, error: String(err) });
+        }
       }
     };
 
@@ -47,15 +87,19 @@ const App: React.FC = () => {
 
     // 인증 상태 변경 리스너
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const isAdmin = await getAdminStatus();
-        setAuth({ user: session.user, isAdmin, isLoading: false, error: '' });
-      } else {
-        setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
+      if (mounted) {
+        if (session?.user) {
+          const isAdmin = session.user.app_metadata?.role === 'admin';
+          setRole(isAdmin ? 'admin' : 'customer');
+          setAuth({ user: session.user, isAdmin, isLoading: false, error: '' });
+        } else {
+          setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
+        }
       }
     });
 
     return () => {
+      mounted = false;
       subscription?.unsubscribe();
     };
   }, [mode]);
@@ -73,8 +117,8 @@ const App: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase || !loginEmail || !loginPassword) {
-      setAuth(prev => ({ ...prev, error: '이메일과 비밀번호를 입력하세요' }));
+    if (!supabase || !loginId || !loginPassword) {
+      setAuth(prev => ({ ...prev, error: '아이디와 비밀번호를 입력하세요' }));
       return;
     }
 
@@ -83,22 +127,84 @@ const App: React.FC = () => {
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
+        email: loginIdToEmail(loginId),
         password: loginPassword,
       });
 
       if (error) {
-        setAuth(prev => ({ ...prev, error: error.message, isLoading: false }));
+        setAuth(prev => ({ ...prev, error: formatLoginError(error.message), isLoading: false }));
         setIsLoggingIn(false);
         return;
       }
 
       if (data.user) {
-        const isAdmin = await getAdminStatus();
+        const isAdmin = data.user.app_metadata?.role === 'admin';
+        if ((loginPortal === 'admin' && !isAdmin) || (loginPortal === 'customer' && isAdmin)) {
+          await supabase.auth.signOut();
+          setAuth({
+            user: null,
+            isAdmin: false,
+            isLoading: false,
+            error: loginPortal === 'admin'
+              ? '관리자 권한이 없는 계정입니다.'
+              : '관리자 계정은 관리자 로그인 화면을 이용하세요.',
+          });
+          return;
+        }
+        setRole(isAdmin ? 'admin' : 'customer');
+        window.history.replaceState({}, '', isAdmin ? '/admin' : '/customer');
         setAuth({ user: data.user, isAdmin, isLoading: false, error: '' });
-        setLoginEmail('');
+        setLoginId('');
         setLoginPassword('');
       }
+    } catch (err) {
+      setAuth(prev => ({ ...prev, error: String(err), isLoading: false }));
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleQuickLogin = async (loginId: string) => {
+    if (!supabase) return;
+
+    setLoginId(loginId);
+    setLoginPassword('password123');
+    setIsLoggingIn(true);
+    setAuth(prev => ({ ...prev, error: '' }));
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginIdToEmail(loginId),
+        password: 'password123',
+      });
+
+      if (error) {
+        setAuth(prev => ({ ...prev, error: formatLoginError(error.message), isLoading: false }));
+        return;
+      }
+
+      if (!data.user) {
+        setAuth(prev => ({ ...prev, error: '로그인 사용자 정보를 받지 못했습니다.', isLoading: false }));
+        return;
+      }
+
+      const isAdmin = data.user.app_metadata?.role === 'admin';
+      if ((loginPortal === 'admin' && !isAdmin) || (loginPortal === 'customer' && isAdmin)) {
+        await supabase.auth.signOut();
+        setAuth({
+          user: null,
+          isAdmin: false,
+          isLoading: false,
+          error: loginPortal === 'admin'
+            ? '관리자 권한이 없는 계정입니다.'
+            : '관리자 계정은 관리자 로그인 화면을 이용하세요.',
+        });
+        return;
+      }
+      setRole(isAdmin ? 'admin' : 'customer');
+      window.history.replaceState({}, '', isAdmin ? '/admin' : '/customer');
+      setAuth({ user: data.user, isAdmin, isLoading: false, error: '' });
+      setLoginPassword('');
     } catch (err) {
       setAuth(prev => ({ ...prev, error: String(err), isLoading: false }));
     } finally {
@@ -110,14 +216,16 @@ const App: React.FC = () => {
     if (!supabase) return;
 
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        setAuth(prev => ({ ...prev, error: error.message }));
-      } else {
-        setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
-      }
+      const logoutPortal: Role = auth.isAdmin ? 'admin' : 'customer';
+      await supabase.auth.signOut();
+      setRole('customer');
+      window.history.replaceState({}, '', logoutPortal === 'admin' ? '/admin/login' : '/customer/login');
+      setLoginPortal(logoutPortal);
+      setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
+      setLoginId('');
+      setLoginPassword('');
     } catch (err) {
-      setAuth(prev => ({ ...prev, error: String(err) }));
+      setAuth({ user: null, isAdmin: false, isLoading: false, error: String(err) });
     }
   };
 
@@ -152,7 +260,9 @@ const App: React.FC = () => {
           {mode === 'supabase' && auth.user ? (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <span style={{ fontSize: '14px' }}>
-                로그인: {auth.user.email} {auth.isAdmin && <strong>(관리자)</strong>}
+                로그인: {auth.user.email?.replace(/@test\.com$/, '')}{' '}
+                {auth.isAdmin && <strong>(관리자)</strong>}
+                {isAdminAccountWithoutRole && <strong>(관리자 권한 없음)</strong>}
               </span>
               <button
                 className="btn btn-secondary"
@@ -200,10 +310,6 @@ const App: React.FC = () => {
 
       {mode === 'supabase' && !auth.user && (
         <div>
-          <div className="alert alert-info">
-            <strong>Supabase 모드:</strong> 실제 데이터베이스와 인증이 적용됩니다.
-          </div>
-
           {auth.error && (
             <div className="alert alert-error">
               <strong>오류:</strong> {auth.error}
@@ -211,15 +317,17 @@ const App: React.FC = () => {
           )}
 
           <div style={{ maxWidth: '400px', margin: '40px auto', padding: '20px', border: '1px solid #ddd', borderRadius: '4px' }}>
-            <h2>Supabase 로그인</h2>
+            <h2>{loginPortal === 'customer' ? '고객 로그인' : '관리자 로그인'}</h2>
             <form onSubmit={handleLogin}>
               <div className="form-group">
-                <label>이메일</label>
+                <label htmlFor="login-id">아이디</label>
                 <input
-                  type="email"
-                  value={loginEmail}
-                  onChange={e => setLoginEmail(e.target.value)}
-                  placeholder="test@example.com"
+                  id="login-id"
+                  type="text"
+                  value={loginId}
+                  onChange={e => setLoginId(e.target.value)}
+                  placeholder={loginPortal === 'customer' ? 'c01' : 'admin'}
+                  autoComplete="username"
                   disabled={isLoggingIn}
                   required
                 />
@@ -232,6 +340,7 @@ const App: React.FC = () => {
                   value={loginPassword}
                   onChange={e => setLoginPassword(e.target.value)}
                   placeholder="비밀번호"
+                  autoComplete="current-password"
                   disabled={isLoggingIn}
                   required
                 />
@@ -246,13 +355,75 @@ const App: React.FC = () => {
                 {isLoggingIn ? '로그인 중...' : '로그인'}
               </button>
             </form>
+
+            <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #ddd' }}>
+              <p style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>테스트 계정:</p>
+              {loginPortal === 'customer' ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleQuickLogin('c01')}
+                    disabled={isLoggingIn}
+                    style={{ width: '100%', marginBottom: '10px' }}
+                  >
+                    고객 C01로 빠른 로그인
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleQuickLogin('c02')}
+                    disabled={isLoggingIn}
+                    style={{ width: '100%' }}
+                  >
+                    고객 C02로 빠른 로그인
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleQuickLogin('admin')}
+                  disabled={isLoggingIn}
+                  style={{ width: '100%' }}
+                >
+                  관리자로 빠른 로그인
+                </button>
+              )}
+            </div>
+
+            {loginPortal === 'admin' && (
+              <div style={{ marginTop: '20px', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => navigateToLogin('customer')}
+                  disabled={isLoggingIn}
+                >
+                  고객 로그인으로 이동
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {mode === 'supabase' && auth.user && (
         <>
-          {role === 'customer' && <CustomerPage db={db} mode={mode} userId={auth.user.id} />}
+          {isAdminAccountWithoutRole && (
+            <div className="alert alert-error">
+              <strong>관리자 권한 설정이 필요합니다.</strong>{' '}
+              sql/01_set_admin.sql을 실행한 뒤 로그아웃하고 다시 로그인하세요.
+            </div>
+          )}
+          {role === 'customer' && !isAdminAccountWithoutRole && (
+            <CustomerPage
+              db={db}
+              mode={mode}
+              userId={auth.user.id}
+              loginId={auth.user.email?.replace(/@test\.com$/, '')}
+            />
+          )}
           {role === 'admin' && auth.isAdmin && <AdminPage db={db} mode={mode} userId={auth.user.id} />}
           {role === 'admin' && !auth.isAdmin && (
             <div className="alert alert-error">

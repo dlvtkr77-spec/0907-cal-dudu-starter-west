@@ -11,9 +11,10 @@ interface CustomerPageProps {
   db: DatabaseManager;
   mode: 'local' | 'supabase';
   userId?: string;
+  loginId?: string;
 }
 
-export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) => {
+export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, loginId }) => {
   const [customerId, setCustomerId] = useState<string>('C01');
   const [stage, setStage] = useState<'select' | 'confirm' | 'view' | 'reselect'>('select');
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
@@ -143,7 +144,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) 
 
       const requests = result.requests.map((r: any) => ({
         id: r.id,
-        customerId: r.customer_id,
+        customerId: r.customer_login_id || r.customer_id,
         version: r.version,
         createdAt: r.created_at,
         status: r.status,
@@ -261,14 +262,19 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) 
   return (
     <div className="customer-page">
       <div className="form-group">
-        <label>고객 코드</label>
-        <input
-          type="text"
-          value={customerId}
-          onChange={e => setCustomerId(e.target.value)}
-          placeholder="C01"
-          disabled={stage === 'confirm'}
-        />
+        <label htmlFor="customer-id">고객 아이디</label>
+        {mode === 'supabase' ? (
+          <input id="customer-id" type="text" value={loginId || ''} readOnly />
+        ) : (
+          <input
+            id="customer-id"
+            type="text"
+            value={customerId}
+            onChange={e => setCustomerId(e.target.value)}
+            placeholder="C01"
+            disabled={stage === 'confirm'}
+          />
+        )}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -364,9 +370,9 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) 
         </div>
       )}
 
-      {stage === 'view' && customerRequests.length > 0 && (
+      {customerRequests.length > 0 && (
         <div>
-          <h3>내 신청 현황</h3>
+          <h3>{stage === 'view' ? '내 신청 현황' : '내 신청 목록'}</h3>
           {customerRequests.map((item, idx) => (
             <div key={item.request.id} style={{ marginBottom: '20px', padding: '16px', background: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
               <h4>신청 #{item.request.version} (접수일: {new Date(item.request.createdAt).toLocaleString()})</h4>
@@ -415,7 +421,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) 
                 </div>
               )}
 
-              {item.request.status === 'needs_reselection' && idx === customerRequests.length - 1 && (
+              {stage === 'view' && item.request.status === 'needs_reselection' && idx === customerRequests.length - 1 && (
                 <button
                   className="btn btn-warning"
                   onClick={() => {
@@ -430,7 +436,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId }) 
             </div>
           ))}
 
-          {customerRequests.length > 0 && customerRequests[customerRequests.length - 1].request.status === 'confirmed' && (
+          {stage === 'view' && customerRequests[customerRequests.length - 1].request.status === 'confirmed' && (
             <button
               className="btn btn-primary"
               onClick={() => {

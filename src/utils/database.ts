@@ -175,6 +175,30 @@ export class DatabaseManager {
     }
   }
 
+  deleteRequest(id: string): boolean {
+    const current = this.getCurrent();
+    const request = current.requests.find(r => r.id === id);
+    if (!request) return false;
+
+    if (request.confirmedSlotId) {
+      const slot = current.slots[request.confirmedSlotId];
+      if (slot) {
+        current.slots[request.confirmedSlotId] = {
+          ...slot,
+          status: 'available',
+          confirmedAt: undefined,
+          confirmedBy: undefined,
+        };
+      }
+    }
+
+    current.candidates = current.candidates.filter(c => c.requestId !== id);
+    current.logs = current.logs.filter(log => log.requestId !== id);
+    current.requests = current.requests.filter(r => r.id !== id);
+    this.saveToLocalStorage();
+    return true;
+  }
+
   // 후보 생성/추가
   addCandidate(
     requestId: string,

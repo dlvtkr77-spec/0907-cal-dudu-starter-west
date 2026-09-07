@@ -15,8 +15,12 @@ export async function getCurrentUser() {
   if (!supabase) return null;
 
   try {
-    const { data } = await supabase.auth.getUser();
-    return data.user;
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      console.warn('getCurrentUser error:', error);
+      return null;
+    }
+    return data?.user || null;
   } catch (error) {
     console.error('Error getting current user:', error);
     return null;
@@ -27,8 +31,8 @@ export async function getAdminStatus(): Promise<boolean> {
   if (!supabase) return false;
 
   try {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) return false;
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) return false;
 
     const session = await supabase.auth.getSession();
     const appMetadata = session.data.session?.user.app_metadata;

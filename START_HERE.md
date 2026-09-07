@@ -51,6 +51,32 @@ select count(*) as slots, min(date) as first_day, max(date) as last_day from pub
 
 RPC(앱에서 호출하는 DB 함수)는 submit_request, confirm_request, resubmit_request입니다. 고객은 Supabase Auth의 사용자 UUID로 식별합니다. 관리자 권한은 서버가 관리하는 app_metadata.role='admin'을 확인합니다. 고객이 수정할 수 있는 user_metadata에 관리자 권한을 넣지 않습니다.
 
+### 테스트 로그인 사용자 준비
+
+빠른 로그인 버튼은 사용자를 자동으로 만들지 않습니다. Supabase Dashboard의 Authentication > Users에서 아래 사용자를 먼저 생성하고, 이메일 확인을 완료된 상태로 설정합니다.
+
+- 고객: `c01@test.com` / `password123`
+- 고객: `c02@test.com` / `password123`
+- 관리자: `admin@test.com` / `password123`
+
+앱 로그인 화면에는 이메일 대신 일반 아이디 `c01`, `c02` 또는 `admin`을 입력합니다. 앱이 Supabase 인증용 이메일로 내부 변환합니다.
+
+관리자 사용자를 만든 뒤 SQL Editor에서 `sql/01_set_admin.sql` 전체를 실행합니다. 이 스크립트는 관리자 역할을 `user_metadata`가 아니라 서버에서만 관리되는 `app_metadata`에 저장합니다. 실행 후 앱에서 반드시 로그아웃하고 다시 로그인합니다.
+
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+where email = 'admin@test.com';
+```
+
+로그인 후 고객이 접수하면 Table Editor의 `public.requests`에 신청 1행, `public.candidates`에 선택한 희망 수만큼 행, `public.operation_logs`에 성공 기록 1행이 생깁니다. `public.slots`는 접수만으로 마감되지 않고 관리자가 확정한 뒤에만 바뀝니다.
+
+Table Editor와 어드민 화면에서 UUID 대신 `c01`, `c02` 같은 아이디를 함께 보려면 SQL Editor에서 `sql/02_customer_login_ids.sql`을 한 번 실행합니다. `customer_id`는 권한 검증용 UUID로 유지되고, 사람이 확인하는 값은 `customer_login_id`에 저장됩니다. 이 스크립트는 기존 신청도 함께 채웁니다.
+
+어드민 화면에서 개별 접수 삭제와 전체 초기화를 사용하려면 SQL Editor에서 `sql/03_admin_cleanup.sql`을 한 번 실행합니다. 두 작업은 `app_metadata.role='admin'`인 로그인 사용자만 호출할 수 있습니다. 개별 삭제 시 해당 확정 슬롯도 다시 열리며, 전체 초기화는 접수·후보·확정·실행 기록을 비우고 42개 슬롯을 모두 `available`로 되돌립니다.
+
+Table Editor의 `confirmations`에서도 UUID 대신 로그인 아이디를 바로 확인하려면 `sql/04_readable_confirmation_ids.sql`을 한 번 실행합니다. 기존 UUID 열은 관계 보존용으로 유지되고, `customer_login_id`와 `admin_login_id` 열에 `c01`, `c02`, `admin`이 함께 저장됩니다. 기존 확정 기록도 가능한 범위에서 자동으로 채웁니다.
+
 현재 ZIP의 화면은 한 브라우저의 localStorage를 사용하는 공통 예약 실습 화면입니다. SQL 설치는 Supabase DB를 준비하는 단계입니다. 환경 변수 입력만으로 이 화면이 자동으로 Supabase에 연결되지는 않습니다. 로그인 화면과 DB 호출 연결은 아래 프롬프트로 이어갑니다.
 
 ## 5. VS Code의 Haiku에 넣는 연결 프롬프트
