@@ -54,20 +54,20 @@ RPC(앱에서 호출하는 DB 함수)는 submit_request, confirm_request, resubm
 
 ### 테스트 로그인 사용자 준비
 
-빠른 로그인 버튼은 사용자를 자동으로 만들지 않습니다. Supabase Dashboard의 Authentication > Users에서 아래 사용자를 먼저 생성하고, 이메일 확인을 완료된 상태로 설정합니다.
+기본 로그인은 Google OAuth입니다. Google Cloud에서 Web OAuth Client를 만들고 Authorized redirect URI에 Supabase Dashboard의 Google Provider 화면에 표시되는 callback URL을 등록합니다. Supabase Dashboard의 Authentication > Providers > Google에 Client ID와 Client Secret을 입력하고 활성화합니다. Authentication > URL Configuration의 Redirect URLs에는 로컬 `http://127.0.0.1:5187/**`, `http://localhost:5187/**`와 실제 배포 주소를 등록합니다. Client Secret은 프로젝트 파일이나 `VITE_` 환경 변수에 넣지 않습니다.
+
+빠른 로그인 버튼은 사용자를 자동으로 만들지 않습니다. 테스트용 C01 버튼을 사용하려면 Supabase Dashboard의 Authentication > Users에서 아래 사용자를 만들고 이메일 확인을 완료된 상태로 설정합니다.
 
 - 고객: `c01@test.com` / `password123`
-- 고객: `c02@test.com` / `password123`
-- 관리자: `admin@test.com` / `password123`
 
-앱 로그인 화면에는 이메일 대신 일반 아이디 `c01`, `c02` 또는 `admin`을 입력합니다. 앱이 Supabase 인증용 이메일로 내부 변환합니다.
+일반 고객과 관리자는 Google 버튼으로 로그인합니다. 관리자 Google 계정은 로그인한 뒤 아래 SQL의 이메일 조건을 실제 관리자 Google 이메일로 바꾸어 `app_metadata.role='admin'`을 지정하고 다시 로그인합니다.
 
 관리자 사용자를 만든 뒤 SQL Editor에서 `sql/01_set_admin.sql` 전체를 실행합니다. 이 스크립트는 관리자 역할을 `user_metadata`가 아니라 서버에서만 관리되는 `app_metadata`에 저장합니다. 실행 후 앱에서 반드시 로그아웃하고 다시 로그인합니다.
 
 ```sql
 update auth.users
 set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
-where email = 'admin@test.com';
+where email = '실제-관리자-Google-이메일';
 ```
 
 로그인 후 고객이 접수하면 Table Editor의 `public.requests`에 신청 1행, `public.candidates`에 선택한 희망 수만큼 행, `public.operation_logs`에 성공 기록 1행이 생깁니다. `public.slots`는 접수만으로 마감되지 않고 관리자가 확정한 뒤에만 바뀝니다.

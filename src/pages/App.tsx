@@ -30,11 +30,10 @@ const App: React.FC = () => {
   const [role, setRole] = useState<Role>('customer');
   const [db] = useState(() => new DatabaseManager());
   const [auth, setAuth] = useState<AuthState>({ user: null, isAdmin: false, isLoading: true, error: '' });
-  const [loginId, setLoginId] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginPortal, setLoginPortal] = useState<Role>(getLoginPortalFromPath);
-  const isAdminAccountWithoutRole = auth.user?.email === 'admin@test.com' && !auth.isAdmin;
+  const [requestedAdminAccess, setRequestedAdminAccess] = useState(() => window.sessionStorage.getItem('cal-dudu-login-portal') === 'admin');
+  const isAdminAccountWithoutRole = Boolean(auth.user && requestedAdminAccess && !auth.isAdmin);
 
   useEffect(() => {
     if (window.location.pathname === '/') {
@@ -53,8 +52,6 @@ const App: React.FC = () => {
   const navigateToLogin = (portal: Role) => {
     window.history.pushState({}, '', portal === 'admin' ? '/admin/login' : '/customer/login');
     setLoginPortal(portal);
-    setLoginId('');
-    setLoginPassword('');
     setAuth(prev => ({ ...prev, error: '' }));
   };
 
@@ -73,10 +70,11 @@ const App: React.FC = () => {
         if (mounted) {
           if (user) {
             const isAdmin = user.app_metadata?.role === 'admin';
-            setRole(isAdmin ? 'admin' : 'customer');
-            const expectedPrefix = isAdmin ? '/admin/' : '/customer/';
+            const targetRole = isAdmin || requestedAdminAccess ? 'admin' : 'customer';
+            setRole(targetRole);
+            const expectedPrefix = targetRole === 'admin' ? '/admin/' : '/customer/';
             if (!window.location.pathname.startsWith(expectedPrefix) || window.location.pathname.endsWith('/login')) {
-              window.history.replaceState({}, '', isAdmin ? '/admin/requests' : '/customer/requests');
+              window.history.replaceState({}, '', targetRole === 'admin' ? '/admin/requests' : '/customer/requests');
             }
             setAuth({ user, isAdmin, isLoading: false, error: '' });
           } else {
@@ -97,7 +95,7 @@ const App: React.FC = () => {
       if (mounted) {
         if (session?.user) {
           const isAdmin = session.user.app_metadata?.role === 'admin';
-          setRole(isAdmin ? 'admin' : 'customer');
+          setRole(isAdmin || requestedAdminAccess ? 'admin' : 'customer');
           setAuth({ user: session.user, isAdmin, isLoading: false, error: '' });
         } else {
           setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
@@ -109,7 +107,7 @@ const App: React.FC = () => {
       mounted = false;
       subscription?.unsubscribe();
     };
-  }, [mode]);
+  }, [mode, requestedAdminAccess]);
 
   const handleRoleChange = (newRole: Role) => {
     setRole(newRole);
@@ -123,51 +121,25 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supabase || !loginId || !loginPassword) {
-      setAuth(prev => ({ ...prev, error: '아이디와 비밀번호를 입력하세요' }));
-      return;
-    }
-
+  const handleGoogleLogin = async () => {
+    if (!supabase) return;
     setIsLoggingIn(true);
     setAuth(prev => ({ ...prev, error: '' }));
-
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginIdToEmail(loginId),
-        password: loginPassword,
+      window.sessionStorage.setItem('cal-dudu-login-portal', loginPortal);
+      setRequestedAdminAccess(loginPortal === 'admin');
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}${loginPortal === 'admin' ? '/admin/requests' : '/customer/requests'}`,
+        },
       });
-
       if (error) {
-        setAuth(prev => ({ ...prev, error: formatLoginError(error.message), isLoading: false }));
+        setAuth(prev => ({ ...prev, error: error.message, isLoading: false }));
         setIsLoggingIn(false);
-        return;
-      }
-
-      if (data.user) {
-        const isAdmin = data.user.app_metadata?.role === 'admin';
-        if ((loginPortal === 'admin' && !isAdmin) || (loginPortal === 'customer' && isAdmin)) {
-          await supabase.auth.signOut();
-          setAuth({
-            user: null,
-            isAdmin: false,
-            isLoading: false,
-            error: loginPortal === 'admin'
-              ? '관리자 권한이 없는 계정입니다.'
-              : '관리자 계정은 관리자 로그인 화면을 이용하세요.',
-          });
-          return;
-        }
-        setRole(isAdmin ? 'admin' : 'customer');
-        window.history.replaceState({}, '', isAdmin ? '/admin/requests' : '/customer/requests');
-        setAuth({ user: data.user, isAdmin, isLoading: false, error: '' });
-        setLoginId('');
-        setLoginPassword('');
       }
     } catch (err) {
       setAuth(prev => ({ ...prev, error: String(err), isLoading: false }));
-    } finally {
       setIsLoggingIn(false);
     }
   };
@@ -175,8 +147,6 @@ const App: React.FC = () => {
   const handleQuickLogin = async (loginId: string) => {
     if (!supabase) return;
 
-    setLoginId(loginId);
-    setLoginPassword('password123');
     setIsLoggingIn(true);
     setAuth(prev => ({ ...prev, error: '' }));
 
@@ -212,7 +182,6 @@ const App: React.FC = () => {
       setRole(isAdmin ? 'admin' : 'customer');
       window.history.replaceState({}, '', isAdmin ? '/admin/requests' : '/customer/requests');
       setAuth({ user: data.user, isAdmin, isLoading: false, error: '' });
-      setLoginPassword('');
     } catch (err) {
       setAuth(prev => ({ ...prev, error: String(err), isLoading: false }));
     } finally {
@@ -230,8 +199,8 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', logoutPortal === 'admin' ? '/admin/login' : '/customer/login');
       setLoginPortal(logoutPortal);
       setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
-      setLoginId('');
-      setLoginPassword('');
+      setRequestedAdminAccess(false);
+      window.sessionStorage.removeItem('cal-dudu-login-portal');
     } catch (err) {
       setAuth({ user: null, isAdmin: false, isLoading: false, error: String(err) });
     }
@@ -324,94 +293,22 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <div style={{ maxWidth: '400px', margin: '40px auto', padding: '20px', border: '1px solid #ddd', borderRadius: '4px' }}>
+          <div className="login-panel">
             <h2>{loginPortal === 'customer' ? '고객 로그인' : '관리자 로그인'}</h2>
-            <form onSubmit={handleLogin}>
-              <div className="form-group">
-                <label htmlFor="login-id">아이디</label>
-                <input
-                  id="login-id"
-                  type="text"
-                  value={loginId}
-                  onChange={e => setLoginId(e.target.value)}
-                  placeholder={loginPortal === 'customer' ? 'c01' : 'admin'}
-                  autoComplete="username"
-                  disabled={isLoggingIn}
-                  required
-                />
-              </div>
+            <p>{loginPortal === 'customer' ? 'Google 계정으로 예약을 신청하고 확인하세요.' : '관리자 권한이 지정된 Google 계정으로 로그인하세요.'}</p>
+            <button type="button" className="btn google-login" onClick={handleGoogleLogin} disabled={isLoggingIn}>
+              <span aria-hidden="true">G</span>{isLoggingIn ? 'Google로 이동 중...' : 'Google로 계속하기'}
+            </button>
 
-              <div className="form-group">
-                <label>비밀번호</label>
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={e => setLoginPassword(e.target.value)}
-                  placeholder="비밀번호"
-                  autoComplete="current-password"
-                  disabled={isLoggingIn}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={isLoggingIn}
-                style={{ width: '100%' }}
-              >
-                {isLoggingIn ? '로그인 중...' : '로그인'}
-              </button>
-            </form>
-
-            <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #ddd' }}>
-              <p style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>테스트 계정:</p>
-              {loginPortal === 'customer' ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleQuickLogin('c01')}
-                    disabled={isLoggingIn}
-                    style={{ width: '100%', marginBottom: '10px' }}
-                  >
-                    고객 C01로 빠른 로그인
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleQuickLogin('c02')}
-                    disabled={isLoggingIn}
-                    style={{ width: '100%' }}
-                  >
-                    고객 C02로 빠른 로그인
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => handleQuickLogin('admin')}
-                  disabled={isLoggingIn}
-                  style={{ width: '100%' }}
-                >
-                  관리자로 빠른 로그인
-                </button>
-              )}
+            {loginPortal === 'customer' && <div className="quick-login">
+              <span>또는 테스트</span>
+              <button type="button" className="btn btn-secondary" onClick={() => handleQuickLogin('c01')} disabled={isLoggingIn}>고객 C01 빠른 로그인</button>
             </div>
+            }
 
-            {loginPortal === 'admin' && (
-              <div style={{ marginTop: '20px', textAlign: 'center' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => navigateToLogin('customer')}
-                  disabled={isLoggingIn}
-                >
-                  고객 로그인으로 이동
-                </button>
-              </div>
-            )}
+            <button type="button" className="login-switch" onClick={() => navigateToLogin(loginPortal === 'admin' ? 'customer' : 'admin')} disabled={isLoggingIn}>
+              {loginPortal === 'admin' ? '고객 로그인으로 이동' : '관리자 로그인'}
+            </button>
           </div>
         </div>
       )}
