@@ -56,11 +56,12 @@ RPC(앱에서 호출하는 DB 함수)는 submit_request, confirm_request, resubm
 
 기본 로그인은 Google OAuth입니다. Google Cloud에서 Web OAuth Client를 만들고 Authorized redirect URI에 Supabase Dashboard의 Google Provider 화면에 표시되는 callback URL을 등록합니다. Supabase Dashboard의 Authentication > Providers > Google에 Client ID와 Client Secret을 입력하고 활성화합니다. Authentication > URL Configuration의 Redirect URLs에는 로컬 `http://127.0.0.1:5187/**`, `http://localhost:5187/**`와 실제 배포 주소를 등록합니다. Client Secret은 프로젝트 파일이나 `VITE_` 환경 변수에 넣지 않습니다.
 
-빠른 로그인 버튼은 사용자를 자동으로 만들지 않습니다. 테스트용 C01 버튼을 사용하려면 Supabase Dashboard의 Authentication > Users에서 아래 사용자를 만들고 이메일 확인을 완료된 상태로 설정합니다.
+빠른 로그인 버튼은 사용자를 자동으로 만들지 않습니다. 고객과 관리자 테스트 버튼을 사용하려면 Supabase Dashboard의 Authentication > Users에서 아래 사용자를 만들고 이메일 확인을 완료된 상태로 설정합니다.
 
 - 고객: `c01@test.com` / `password123`
+- 관리자: `admin@test.com` / `password123`
 
-일반 고객과 관리자는 Google 버튼으로 로그인합니다. 관리자 Google 계정은 로그인한 뒤 아래 SQL의 이메일 조건을 실제 관리자 Google 이메일로 바꾸어 `app_metadata.role='admin'`을 지정하고 다시 로그인합니다.
+일반 고객과 관리자는 Google 버튼으로 로그인합니다. 테스트 관리자와 실제 관리자 Google 계정은 로그인한 뒤 `sql/01_set_admin.sql`의 이메일 조건을 해당 이메일로 바꾸어 `app_metadata.role='admin'`을 지정하고 다시 로그인합니다.
 
 관리자 사용자를 만든 뒤 SQL Editor에서 `sql/01_set_admin.sql` 전체를 실행합니다. 이 스크립트는 관리자 역할을 `user_metadata`가 아니라 서버에서만 관리되는 `app_metadata`에 저장합니다. 실행 후 앱에서 반드시 로그아웃하고 다시 로그인합니다.
 

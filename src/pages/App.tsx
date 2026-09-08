@@ -300,11 +300,17 @@ const App: React.FC = () => {
               <span aria-hidden="true">G</span>{isLoggingIn ? 'Google로 이동 중...' : 'Google로 계속하기'}
             </button>
 
-            {loginPortal === 'customer' && <div className="quick-login">
+            <div className="quick-login">
               <span>또는 테스트</span>
-              <button type="button" className="btn btn-secondary" onClick={() => handleQuickLogin('c01')} disabled={isLoggingIn}>고객 C01 빠른 로그인</button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => handleQuickLogin(loginPortal === 'admin' ? 'admin' : 'c01')}
+                disabled={isLoggingIn}
+              >
+                {loginPortal === 'admin' ? '관리자 빠른 로그인' : '고객 C01 빠른 로그인'}
+              </button>
             </div>
-            }
 
             <button type="button" className="login-switch" onClick={() => navigateToLogin(loginPortal === 'admin' ? 'customer' : 'admin')} disabled={isLoggingIn}>
               {loginPortal === 'admin' ? '고객 로그인으로 이동' : '관리자 로그인'}
