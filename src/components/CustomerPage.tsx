@@ -26,6 +26,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [dateFilter, setDateFilter] = useState<'all' | 'weekday' | 'weekend' | 'available'>('all');
 
   const om = new OperationManager(db);
 
@@ -63,6 +64,10 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
   };
 
   const handleSlotToggle = (slotId: string) => {
+    if (!selectedSlots.includes(slotId) && selectedSlots.length >= 3) {
+      setError('희망 시간은 최대 3개까지 선택할 수 있습니다. 기존 선택을 제거한 뒤 다시 선택하세요.');
+      return;
+    }
     setSelectedSlots(prev => {
       if (prev.includes(slotId)) {
         return prev.filter(s => s !== slotId);
@@ -85,6 +90,31 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
     setSuccess('');
 
     try {
+      if (mode === 'supabase') {
+        const latestSlots = await supabaseRPC.getSlots();
+        if (!latestSlots.success) {
+          setError(`선택 시간 확인 실패: ${latestSlots.error}`);
+          return;
+        }
+        const closedIds = new Set(
+          latestSlots.slots.filter((slot: any) => slot.status === 'confirmed').map((slot: any) => slot.id)
+        );
+        const closedSelected = selectedSlots.filter(slotId => closedIds.has(slotId));
+        if (closedSelected.length > 0) {
+          setError(`선택한 시간이 방금 마감되었습니다: ${closedSelected.map(formatSlot).join(', ')}. 다시 선택하세요.`);
+          setStage('select');
+          return;
+        }
+      } else {
+        const currentSlots = db.getState().slots;
+        const closedSelected = selectedSlots.filter(slotId => currentSlots[slotId]?.status === 'confirmed');
+        if (closedSelected.length > 0) {
+          setError(`선택한 시간이 방금 마감되었습니다: ${closedSelected.map(formatSlot).join(', ')}. 다시 선택하세요.`);
+          setStage('select');
+          return;
+        }
+      }
+
       const operationCustomerId = mode === 'supabase' ? (loginId || userId) : customerId;
       const operationId = `submit-${operationCustomerId}-${Date.now()}`;
 
@@ -239,8 +269,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
   };
 
   const handleCancel = () => {
-    setSelectedSlots([]);
-    setStage('view');
+    setStage(customerRequests.length === 0 ? 'select' : 'view');
     setError('');
   };
 
@@ -277,9 +306,57 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
     return true;
   };
 
+  const formatSlot = (slotId: string) => {
+    const slot = slots[slotId];
+    if (!slot) return slotId;
+    const time = TIME_SLOTS.find(item => item.label === slot.timeLabel)?.displayLabel || slot.timeLabel;
+    return `${slot.date} · ${time}`;
+  };
+
+  const renderSelection = (removable = false) => (
+    <ol className="selection-list">
+      {selectedSlots.map((slotId, idx) => (
+        <li key={slotId}>
+          <span className="priority-number">{idx + 1}</span>
+          <span><strong>{formatSlot(slotId)}</strong><small>{idx === 0 ? '가장 선호하는 시간' : `${idx + 1}순위 희망`}</small></span>
+          {removable && (
+            <span className="selection-actions">
+              <button type="button" className="text-button" disabled={idx === 0} onClick={() => moveSelection(idx, -1)}>위로</button>
+              <button type="button" className="text-button" disabled={idx === selectedSlots.length - 1} onClick={() => moveSelection(idx, 1)}>아래로</button>
+              <button type="button" className="text-button" onClick={() => handleSlotToggle(slotId)}>제거</button>
+            </span>
+          )}
+        </li>
+      ))}
+      {selectedSlots.length === 0 && <li className="empty-selection">날짜와 시간을 선택하면 여기에 순서대로 표시됩니다.</li>}
+    </ol>
+  );
+
+  const moveSelection = (index: number, direction: -1 | 1) => {
+    setSelectedSlots(current => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const reordered = [...current];
+      [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+      return reordered;
+    });
+  };
+
+  const step = stage === 'select' || stage === 'reselect' ? 1 : stage === 'confirm' ? 2 : 3;
+
   return (
-    <div className="customer-page">
-      <div className="form-group">
+    <div className="customer-page page-stack">
+      <div className="page-title-row">
+        <div><span className="eyebrow">예약 신청</span><h2>상담 희망 시간을 선택하세요</h2><p>최대 3개까지, 선택한 순서대로 우선순위가 정해집니다.</p></div>
+      </div>
+      <ol className="booking-steps" aria-label="예약 진행 단계">
+        {['시간 선택', '신청 확인', '처리 상태'].map((label, index) => (
+          <li key={label} className={step === index + 1 ? 'active' : step > index + 1 ? 'done' : ''} aria-current={step === index + 1 ? 'step' : undefined}>
+            <span>{index + 1}</span>{label}
+          </li>
+        ))}
+      </ol>
+      <div className="form-group identity-field">
         <label htmlFor="customer-id">고객 아이디</label>
         {mode === 'supabase' ? (
           <input id="customer-id" type="text" value={loginId || ''} readOnly />
@@ -299,83 +376,49 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
       {success && <div className="alert alert-success">{success}</div>}
 
       {stage === 'select' && (
-        <div>
-          <h3>슬롯 선택 (1~3개)</h3>
-          <p style={{ color: '#666', fontSize: '14px' }}>
-            원하는 슬롯을 선택하고 제출하세요. 선택 순서가 희망 우선순위입니다.
-          </p>
-          <SlotTable
+        <div className="booking-layout">
+          <aside className="booking-summary">
+            <span className="eyebrow">선택 요약</span>
+            <h3>{selectedSlots.length > 0 ? `${selectedSlots.length}개 시간 선택` : '희망 시간'}</h3>
+            <p>접수 후 관리자가 가능한 후보 하나를 확정합니다.</p>
+            {renderSelection(true)}
+            <button className="btn btn-primary btn-block" onClick={() => setStage('confirm')} disabled={selectedSlots.length === 0 || loading}>다음: 신청 내용 확인</button>
+          </aside>
+          <section className="booking-picker" aria-labelledby="slot-picker-title">
+            <div className="section-heading"><div><span className="step-label">1단계</span><h3 id="slot-picker-title">날짜와 시간 선택</h3></div><strong>{selectedSlots.length}/3 선택</strong></div>
+            <p className="helper-text">가능한 칸을 누르세요. 같은 시간에 여러 고객이 희망을 제출할 수 있습니다.</p>
+            <div className="date-filters" aria-label="날짜 빠른 필터">
+              {([
+                ['all', '전체'], ['weekday', '평일'], ['weekend', '주말'], ['available', '가능한 날짜만'],
+              ] as const).map(([value, label]) => (
+                <button key={value} type="button" className={dateFilter === value ? 'active' : ''} aria-pressed={dateFilter === value} onClick={() => setDateFilter(value)}>{label}</button>
+              ))}
+            </div>
+            <SlotTable
             slots={slots}
             selectedSlots={selectedSlots}
             onToggle={handleSlotToggle}
             mode="select"
             maxSelect={3}
-          />
-
-          <div style={{ marginBottom: '20px' }}>
-            <h4>선택한 슬롯 ({selectedSlots.length}/3)</h4>
-            <ul className="list">
-              {selectedSlots.map((slotId, idx) => {
-                const slot = slots[slotId];
-                return (
-                  <li key={slotId}>
-                    <span>
-                      {idx + 1}. {slot?.date} {TIME_SLOTS.find(t => t.label === slot?.timeLabel)?.displayLabel}
-                    </span>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => handleSlotToggle(slotId)}
-                      style={{ padding: '4px 8px', fontSize: '12px' }}
-                    >
-                      제거
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <button
-            className="btn btn-primary"
-            onClick={() => setStage('confirm')}
-            disabled={selectedSlots.length === 0 || loading}
-          >
-            다음: 최종 확인
-          </button>
+            dateFilter={dateFilter}
+            />
+          </section>
         </div>
       )}
 
       {stage === 'confirm' && checkSlotAvailability() && (
-        <div>
-          <h3>최종 확인</h3>
-          <p style={{ color: '#666', fontSize: '14px' }}>
-            다음과 같이 신청합니다. 제출하면 어드민이 확인 후 확정합니다.
-          </p>
-          <SlotTable slots={slots} selectedSlots={selectedSlots} onToggle={() => {}} mode="view" />
-
-          <div style={{ marginBottom: '20px' }}>
-            <h4>최종 선택 (우선순위 순)</h4>
-            <ul className="list">
-              {selectedSlots.map((slotId, idx) => {
-                const slot = slots[slotId];
-                return (
-                  <li key={slotId}>
-                    <span>
-                      {idx + 1}. {slot?.date} {TIME_SLOTS.find(t => t.label === slot?.timeLabel)?.displayLabel}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px' }}>
+        <section className="confirm-card">
+          <span className="step-label">2단계</span><h3>신청 내용을 확인하세요</h3>
+          <p className="helper-text">제출 즉시 확정되지 않습니다. 관리자가 확인할 때까지 ‘예약 확인중’ 상태입니다.</p>
+          <div className="availability-note"><strong>마지막 확인</strong><span>신청 버튼을 누르면 선택한 시간이 아직 가능한지 다시 확인합니다.</span></div>
+          {renderSelection()}
+          <div className="button-row">
             <button
               className="btn btn-primary"
               onClick={handleSubmit}
               disabled={loading}
             >
-              {loading ? '처리 중...' : '제출'}
+              {loading ? '접수 중...' : '이대로 예약 신청'}
             </button>
             <button
               className="btn btn-secondary"
@@ -385,7 +428,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
               돌아가기
             </button>
           </div>
-        </div>
+        </section>
       )}
 
       {customerRequests.length > 0 && (
@@ -396,7 +439,8 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
             const guide = getCustomerStatusGuide(latestRequest.status);
 
             return (
-              <section className="status-guide" aria-live="polite">
+              <section className={`status-guide status-${latestRequest.status}`} aria-live="polite">
+                <span className="status-kicker">{latestRequest.status === 'received' ? '예약 확인중' : latestRequest.status === 'confirmed' ? '예약 확정' : '조치 필요'}</span>
                 <h4>{guide.heading}</h4>
                 <p>{guide.description}</p>
                 <p><strong>지금 할 일:</strong> {guide.nextAction}</p>
@@ -412,7 +456,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
             );
           })()}
           {customerRequests.map((item, idx) => (
-            <div key={item.request.id} style={{ marginBottom: '20px', padding: '16px', background: 'white', borderRadius: '4px', border: '1px solid #ddd' }}>
+            <article key={item.request.id} className="request-card">
               <h4>신청 #{item.request.version} (접수일: {new Date(item.request.createdAt).toLocaleString()})</h4>
 
               <div className="form-group">
@@ -422,7 +466,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
                     <span className="slot-status confirmed">확정됨</span>
                   )}
                   {item.request.status === 'received' && (
-                    <span className="slot-status available">접수됨</span>
+                    <span className="slot-status pending">예약 확인중</span>
                   )}
                   {item.request.status === 'needs_reselection' && (
                     <span className="alert alert-warning">재선택 필요</span>
@@ -471,7 +515,7 @@ export const CustomerPage: React.FC<CustomerPageProps> = ({ db, mode, userId, lo
                   재선택하기
                 </button>
               )}
-            </div>
+            </article>
           ))}
 
           {stage === 'view' && customerRequests[customerRequests.length - 1].request.status === 'confirmed' && (

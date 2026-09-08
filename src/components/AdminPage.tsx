@@ -301,9 +301,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
   ];
 
   return (
-    <div className="admin-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-        <h2>어드민 패널</h2>
+    <div className="admin-page page-stack">
+      <div className="page-title-row">
+        <div><span className="eyebrow">관리자 업무함</span><h2>예약 요청 관리</h2><p>접수 순서와 희망 시간을 확인한 뒤 수동으로 확정합니다.</p></div>
         <button className="btn btn-danger" onClick={handleResetAll} disabled={loading}>
           전체 데이터 초기화
         </button>
@@ -312,12 +312,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
-      <div className="grid">
+      <section className="admin-metrics" aria-label="예약 요청 요약">
+        <div><span>확인 대기</span><strong>{requestCounts.received}</strong></div>
+        <div><span>재선택 필요</span><strong>{requestCounts.needs_reselection}</strong></div>
+        <div><span>확정 완료</span><strong>{requestCounts.confirmed}</strong></div>
+      </section>
+
+      <div className="grid admin-workspace">
         {/* 요청 목록 */}
         <div>
           <div className="admin-list-heading">
             <div>
-              <h3>신청 목록 (총 {requests.length}건)</h3>
+              <h3>신청 목록 <span className="count-label">총 {requests.length}건</span></h3>
               {lastUpdatedAt && (
                 <span>마지막 확인: {lastUpdatedAt.toLocaleTimeString()}</span>
               )}
@@ -383,7 +389,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                         ? '확정됨'
                         : item.request.status === 'needs_reselection'
                           ? '재선택필요'
-                          : '접수됨'}
+                          : '예약 확인중'}
                     </span>
                     {urgency && (
                       <strong style={{ marginLeft: '8px', color: urgency.color, fontSize: '12px' }}>
@@ -405,7 +411,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
         <div>
           <h3>요청 상세</h3>
           {currentRequest ? (
-            <div style={{ padding: '16px', background: 'white', border: '1px solid #ddd', borderRadius: '4px' }}>
+            <div className="admin-detail-card">
               <div className="form-group">
                 <label>고객 코드</label>
                 <input type="text" value={currentRequest.request.customerId} disabled />
@@ -482,7 +488,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                   disabled={!selectedSlotForConfirm || loading}
                   style={{ marginTop: '10px', width: '100%' }}
                 >
-                  {loading ? '처리 중...' : '확정'}
+                  {loading ? '확정 중...' : '선택한 희망 시간으로 확정'}
                 </button>
               )}
               <button
