@@ -25,6 +25,13 @@ interface AdminPageProps {
   userId?: string;
 }
 
+type AdminSection = 'requests' | 'slots' | 'logs';
+const getAdminSectionFromPath = (): AdminSection => {
+  if (window.location.pathname === '/admin/slots') return 'slots';
+  if (window.location.pathname === '/admin/logs') return 'logs';
+  return 'requests';
+};
+
 const getUrgencyLabel = (candidates: Candidate[], slots: Record<string, Slot>) => {
   const earliest = getEarliestCandidateTime(candidates, slots);
   if (!Number.isFinite(earliest)) return null;
@@ -51,8 +58,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('received');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [section, setSection] = useState<AdminSection>(getAdminSectionFromPath);
 
   const om = new OperationManager(db);
+
+  const navigateToSection = (nextSection: AdminSection) => {
+    window.history.pushState({}, '', `/admin/${nextSection}`);
+    setSection(nextSection);
+    setError('');
+    setSuccess('');
+  };
+
+  useEffect(() => {
+    if (window.location.pathname === '/admin') {
+      window.history.replaceState({}, '', '/admin/requests');
+    }
+    const handlePopState = () => setSection(getAdminSectionFromPath());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // 초기 로드
   useEffect(() => {
@@ -68,7 +92,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
     const adminRequests = sortAdminRequests(om.getAdminRequests(), state.slots);
     setSlots(state.slots);
     setRequests(adminRequests);
-    setSelectedRequest(getFirstReceivedRequestId(adminRequests));
+    setSelectedRequest(adminRequests.find(item => item.request.status === 'cancellation_requested')?.request.id ?? getFirstReceivedRequestId(adminRequests));
     setSelectedSlotForConfirm(null);
     setLogs(state.logs || []);
     setLastUpdatedAt(new Date());
@@ -112,6 +136,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
         status: r.status,
         confirmedSlotId: r.confirmed_slot_id,
         confirmedAt: r.confirmed_at,
+        note: r.note,
       }));
 
       const candidates = result.candidates.map((c: any) => ({
@@ -136,7 +161,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
       );
 
       setRequests(adminRequests);
-      setSelectedRequest(getFirstReceivedRequestId(adminRequests));
+      setSelectedRequest(adminRequests.find(item => item.request.status === 'cancellation_requested')?.request.id ?? getFirstReceivedRequestId(adminRequests));
       setSelectedSlotForConfirm(null);
 
       const logsResult = await supabaseRPC.getLogs();
@@ -289,6 +314,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
     }
   };
 
+  const handleResolveCancellation = async (approve: boolean) => {
+    if (!selectedRequest) return;
+    const action = approve ? '승인' : '거절';
+    if (!window.confirm(`이 취소 요청을 ${action}하시겠습니까?`)) return;
+    setLoading(true); setError(''); setSuccess('');
+    const operationId = `cancel-${approve ? 'approve' : 'reject'}-${selectedRequest}`;
+    try {
+      const result = mode === 'supabase'
+        ? await supabaseRPC.resolveCancellation(selectedRequest, approve, operationId)
+        : await om.resolveCancellation(selectedRequest, adminId, approve, operationId);
+      if (!result.success) { setError(result.error || `취소 ${action} 실패`); return; }
+      if (mode === 'supabase') await loadSupabaseData(); else loadData();
+      setSuccess(`취소 요청을 ${action}했습니다.`);
+    } finally { setLoading(false); }
+  };
+
   const requestCounts = countAdminRequestStatuses(requests);
   const visibleRequests = filterAdminRequests(requests, statusFilter);
   const currentRequest = selectedRequest ? requests.find(r => r.request.id === selectedRequest) : null;
@@ -298,24 +339,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
     { value: 'received', label: '접수됨' },
     { value: 'needs_reselection', label: '재선택 필요' },
     { value: 'confirmed', label: '확정됨' },
+    { value: 'cancellation_requested', label: '취소 요청' },
+    { value: 'cancelled', label: '취소됨' },
   ];
 
   return (
     <div className="admin-page page-stack">
       <div className="page-title-row">
-        <div><span className="eyebrow">관리자 업무함</span><h2>예약 요청 관리</h2><p>접수 순서와 희망 시간을 확인한 뒤 수동으로 확정합니다.</p></div>
+        <div><span className="eyebrow">관리자 업무함</span><h2>{section === 'requests' ? '예약 요청 관리' : section === 'slots' ? '슬롯 현황' : '실행 기록'}</h2><p>{section === 'requests' ? '접수 순서와 희망 시간을 확인한 뒤 수동으로 확정합니다.' : section === 'slots' ? '14일간의 전체 예약 가능 여부를 확인합니다.' : '저장 작업의 성공과 실패 위치를 확인합니다.'}</p></div>
         <button className="btn btn-danger" onClick={handleResetAll} disabled={loading}>
           전체 데이터 초기화
         </button>
       </div>
 
+      <nav className="section-nav" aria-label="관리자 메뉴">
+        {([['requests', '신청 관리'], ['slots', '슬롯 현황'], ['logs', '실행 기록']] as const).map(([value, label]) => (
+          <button key={value} type="button" className={section === value ? 'active' : ''} aria-current={section === value ? 'page' : undefined} onClick={() => navigateToSection(value)}>{label}</button>
+        ))}
+      </nav>
+
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
+      {section === 'requests' && <>
       <section className="admin-metrics" aria-label="예약 요청 요약">
         <div><span>확인 대기</span><strong>{requestCounts.received}</strong></div>
         <div><span>재선택 필요</span><strong>{requestCounts.needs_reselection}</strong></div>
         <div><span>확정 완료</span><strong>{requestCounts.confirmed}</strong></div>
+        <div><span>취소 요청</span><strong>{requestCounts.cancellation_requested}</strong></div>
       </section>
 
       <div className="grid admin-workspace">
@@ -354,26 +405,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
               </button>
             ))}
           </div>
-          <div style={{ maxHeight: '500px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px' }}>
+          <div className="admin-request-list">
             <ul className="list" style={{ margin: 0 }}>
               {visibleRequests.map((item, idx) => {
-                const urgency = item.request.status === 'confirmed'
+                const urgency = ['confirmed', 'cancelled'].includes(item.request.status)
                   ? null
                   : getUrgencyLabel(item.candidates, slots);
                 return (
                 <li
                   key={item.request.id}
+                  className={`admin-request-item ${selectedRequest === item.request.id ? 'selected' : ''}`}
                   onClick={() => {
                     setSelectedRequest(item.request.id);
                     setSelectedSlotForConfirm(null);
                   }}
                   style={{
                     cursor: 'pointer',
-                    background: selectedRequest === item.request.id ? '#e7f3ff' : 'white',
-                    borderColor: selectedRequest === item.request.id ? '#007bff' : '#ddd',
                     marginBottom: '0',
                     borderRadius: '0',
-                    borderBottom: '1px solid #ddd',
                   }}
                 >
                   <div>
@@ -385,8 +434,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                     </span>
                     <br />
                     <span className={`slot-status ${item.request.status === 'confirmed' ? 'confirmed' : 'available'}`}>
-                      {item.request.status === 'confirmed'
-                        ? '확정됨'
+                      {item.request.status === 'confirmed' ? '확정됨'
+                        : item.request.status === 'cancellation_requested' ? '취소 요청'
+                        : item.request.status === 'cancelled' ? '취소됨'
                         : item.request.status === 'needs_reselection'
                           ? '재선택필요'
                           : '예약 확인중'}
@@ -422,14 +472,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                 <input
                   type="text"
                   value={
-                    currentRequest.request.status === 'confirmed'
-                      ? '확정됨'
+                    currentRequest.request.status === 'confirmed' ? '확정됨'
+                      : currentRequest.request.status === 'cancellation_requested' ? '취소 요청'
+                      : currentRequest.request.status === 'cancelled' ? '취소됨'
                       : currentRequest.request.status === 'needs_reselection'
                         ? '재선택필요'
                         : '접수됨'
                   }
                   disabled
                 />
+              </div>
+
+              <div className="form-group">
+                <label>고객 메모</label>
+                <div className={`admin-note ${currentRequest.request.note ? '' : 'empty'}`}>{currentRequest.request.note || '남긴 메모가 없습니다.'}</div>
               </div>
 
               <div className="form-group">
@@ -441,6 +497,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                     return (
                       <li
                         key={c.id}
+                        className={`admin-candidate ${selectedSlotForConfirm === c.slotId ? 'selected' : ''} ${!isAvailable ? 'closed' : ''}`}
                         onClick={() => {
                           if (isAvailable && currentRequest.request.status !== 'confirmed') {
                             setSelectedSlotForConfirm(c.slotId);
@@ -448,13 +505,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                         }}
                         style={{
                           cursor: isAvailable && currentRequest.request.status !== 'confirmed' ? 'pointer' : 'default',
-                          background:
-                            selectedSlotForConfirm === c.slotId
-                              ? '#d4edda'
-                              : isAvailable
-                                ? 'white'
-                                : '#f8d7da',
-                          borderColor: selectedSlotForConfirm === c.slotId ? '#28a745' : '#ddd',
                         }}
                       >
                         <span>
@@ -470,7 +520,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                 </ul>
               </div>
 
-              {currentRequest.request.status === 'confirmed' && currentRequest.request.confirmedSlotId && (
+              {['confirmed', 'cancellation_requested', 'cancelled'].includes(currentRequest.request.status) && currentRequest.request.confirmedSlotId && (
                 <div className="alert alert-success">
                   <strong>확정 완료</strong>
                   <br />
@@ -481,7 +531,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                 </div>
               )}
 
-              {currentRequest.request.status !== 'confirmed' && (
+              {['received', 'needs_reselection'].includes(currentRequest.request.status) && (
                 <button
                   className="btn btn-success"
                   onClick={handleConfirm}
@@ -491,32 +541,39 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
                   {loading ? '확정 중...' : '선택한 희망 시간으로 확정'}
                 </button>
               )}
-              <button
+              {currentRequest.request.status === 'cancellation_requested' && (
+                <div className="button-row cancellation-actions">
+                  <button className="btn btn-danger" onClick={() => handleResolveCancellation(true)} disabled={loading}>취소 승인</button>
+                  <button className="btn btn-secondary" onClick={() => handleResolveCancellation(false)} disabled={loading}>취소 거절</button>
+                </div>
+              )}
+              {currentRequest.request.status !== 'cancelled' && <button
                 className="btn btn-danger"
                 onClick={handleDeleteRequest}
                 disabled={loading}
                 style={{ marginTop: '10px', width: '100%' }}
               >
                 이 접수건 삭제
-              </button>
+              </button>}
             </div>
           ) : (
-            <div style={{ padding: '16px', background: '#f0f0f0', borderRadius: '4px', color: '#666' }}>
+            <div className="admin-empty-detail">
               목록에서 요청을 선택하세요
             </div>
           )}
         </div>
       </div>
+      </>}
 
       {/* 슬롯 현황 */}
-      <div style={{ marginTop: '40px' }}>
-        <h3>슬롯 현황 (표시용)</h3>
+      {section === 'slots' && <section className="route-panel">
+        <div className="section-heading"><div><span className="step-label">전체 42슬롯</span><h3>날짜별 예약 가능 여부</h3></div><button type="button" className="btn btn-secondary" onClick={handleRefreshRequests} disabled={loading}>{loading ? '확인 중...' : '새로고침'}</button></div>
         <SlotTable slots={slots} selectedSlots={[]} onToggle={() => {}} mode="view" />
-      </div>
+      </section>}
 
       {/* 실행 기록 */}
-      <div style={{ marginTop: '40px' }}>
-        <h3>실행 기록 (최근 20건)</h3>
+      {section === 'logs' && <section className="route-panel">
+        <div className="section-heading"><div><span className="step-label">최근 20건</span><h3>저장 작업 감사 기록</h3></div><button type="button" className="btn btn-secondary" onClick={handleRefreshRequests} disabled={loading}>{loading ? '확인 중...' : '새로고침'}</button></div>
         <div className="table-container">
           <table className="slots-table">
             <thead>
@@ -564,7 +621,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ db, mode, userId }) => {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>}
     </div>
   );
 };

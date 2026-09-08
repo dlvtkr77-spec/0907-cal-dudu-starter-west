@@ -131,11 +131,11 @@ export class DatabaseManager {
   }
 
   // 요청 생성 (고객당 1개만 허용, needs_reselection 상태는 제외)
-  createRequest(customerId: string): Request | null {
+  createRequest(customerId: string, note?: string): Request | null {
     const current = this.getCurrent();
     // 고객의 미확정 요청이 있으면 새로 생성하지 않음
     const existing = current.requests.find(
-      r => r.customerId === customerId && r.status !== 'confirmed'
+      r => r.customerId === customerId && !['confirmed', 'cancelled'].includes(r.status)
     );
     if (existing) {
       return null; // 이미 미확정 요청이 있음
@@ -147,6 +147,7 @@ export class DatabaseManager {
       version: 1,
       createdAt: new Date().toISOString(),
       status: 'received',
+      note: note?.trim() || undefined,
     };
     current.requests.push(request);
     return request;
@@ -180,9 +181,9 @@ export class DatabaseManager {
     const request = current.requests.find(r => r.id === id);
     if (!request) return false;
 
-    if (request.confirmedSlotId) {
+    if (request.confirmedSlotId && ['confirmed', 'cancellation_requested'].includes(request.status)) {
       const slot = current.slots[request.confirmedSlotId];
-      if (slot) {
+      if (slot?.status === 'confirmed' && slot.confirmedBy === request.customerId) {
         current.slots[request.confirmedSlotId] = {
           ...slot,
           status: 'available',

@@ -75,6 +75,8 @@ describe('admin request status filter', () => {
       received: 1,
       needs_reselection: 1,
       confirmed: 1,
+      cancellation_requested: 0,
+      cancelled: 0,
     });
   });
 

@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { getCustomerStatusGuide } from '../src/utils/customerStatus';
 
 describe('customer status guide', () => {
+  it('취소 요청은 승인 전까지 예약이 유지된다고 안내한다', () => {
+    const guide = getCustomerStatusGuide('cancellation_requested');
+    expect(guide.heading).toContain('취소 요청');
+    expect(guide.description).toContain('확정 상태');
+  });
+
+  it('취소 승인 후 슬롯이 다시 열렸다고 안내한다', () => {
+    const guide = getCustomerStatusGuide('cancelled');
+    expect(guide.heading).toContain('취소');
+    expect(guide.description).toContain('다시 열렸습니다');
+  });
   it('접수 상태에서는 관리자 확인 대기와 추가 행동이 없음을 안내한다', () => {
     const guide = getCustomerStatusGuide('received');
 

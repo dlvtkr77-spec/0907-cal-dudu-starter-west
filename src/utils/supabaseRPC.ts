@@ -1,16 +1,35 @@
 import { supabase } from './supabaseClient';
 
 export const supabaseRPC = {
-  async submitRequest(customerId: string, slotIds: string[], operationId: string) {
+  async requestCancellation(requestId: string, operationId: string) {
+    if (!supabase) return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
+    try {
+      const { data, error } = await supabase.rpc('request_cancellation', { p_request_id: requestId, p_operation_id: operationId });
+      if (error) return { success: false, error: error.message };
+      return data;
+    } catch (err) { return { success: false, error: String(err) }; }
+  },
+
+  async resolveCancellation(requestId: string, approve: boolean, operationId: string) {
+    if (!supabase) return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
+    try {
+      const { data, error } = await supabase.rpc('resolve_cancellation', { p_request_id: requestId, p_approve: approve, p_operation_id: operationId });
+      if (error) return { success: false, error: error.message };
+      return data;
+    } catch (err) { return { success: false, error: String(err) }; }
+  },
+
+  async submitRequest(customerId: string, slotIds: string[], operationId: string, note = '') {
     if (!supabase) {
       return { success: false, error: '데이터베이스 연결이 설정되지 않았습니다.' };
     }
 
     try {
-      const { data, error } = await supabase.rpc('submit_request', {
+      const { data, error } = await supabase.rpc('submit_request_with_note', {
         p_customer_id: customerId,
         p_slot_ids: slotIds,
         p_operation_id: operationId,
+        p_note: note,
       });
 
       if (error) {

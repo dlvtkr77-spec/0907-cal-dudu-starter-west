@@ -19,15 +19,19 @@ export const countAdminRequestStatuses = (items: AdminRequestItem[]) => ({
   received: items.filter(item => item.request.status === 'received').length,
   needs_reselection: items.filter(item => item.request.status === 'needs_reselection').length,
   confirmed: items.filter(item => item.request.status === 'confirmed').length,
+  cancellation_requested: items.filter(item => item.request.status === 'cancellation_requested').length,
+  cancelled: items.filter(item => item.request.status === 'cancelled').length,
 });
 
 export const getFirstReceivedRequestId = (items: AdminRequestItem[]) =>
   items.find(item => item.request.status === 'received')?.request.id ?? null;
 
 const STATUS_PRIORITY: Record<Request['status'], number> = {
-  received: 0,
-  needs_reselection: 1,
-  confirmed: 2,
+  cancellation_requested: 0,
+  received: 1,
+  needs_reselection: 2,
+  confirmed: 3,
+  cancelled: 4,
 };
 
 export const getEarliestCandidateTime = (

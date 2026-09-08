@@ -35,6 +35,9 @@ export const getOperationActionLabel = (action: OperationLog['action']) => ({
   submit: '신청 접수',
   confirm: '예약 확정',
   reselect: '후보 재선택',
+  request_cancel: '취소 요청',
+  approve_cancel: '취소 승인',
+  reject_cancel: '취소 거절',
 }[action]);
 
 export const sortOperationLogsNewestFirst = (logs: OperationLog[]) =>

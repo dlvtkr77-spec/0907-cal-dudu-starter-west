@@ -14,9 +14,10 @@ export interface Request {
   customerId: string; // "C01" 등
   version: number; // 재선택 시 증가
   createdAt: string; // ISO 8601
-  status: 'received' | 'needs_reselection' | 'confirmed';
+  status: 'received' | 'needs_reselection' | 'confirmed' | 'cancellation_requested' | 'cancelled';
   confirmedSlotId?: string; // 어드민이 선택한 슬롯
   confirmedAt?: string; // ISO 8601
+  note?: string; // 고객이 예약 시 남긴 선택 메모
 }
 
 // 고객이 선택한 희망 슬롯 (여러 개)
@@ -34,7 +35,7 @@ export interface OperationLog {
   id: string; // UUID, 재시도 식별용
   operationId?: string; // 동일 작업 재시도 식별자
   timestamp: string; // ISO 8601
-  action: 'submit' | 'confirm' | 'reselect';
+  action: 'submit' | 'confirm' | 'reselect' | 'request_cancel' | 'approve_cancel' | 'reject_cancel';
   requestId: string; // 영향받은 요청 (검사 단계 실패 시 빈 값)
   adminId?: string; // 어드민만 설정
   slotId?: string; // 확정한 슬롯

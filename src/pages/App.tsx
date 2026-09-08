@@ -41,7 +41,11 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', '/customer/login');
     }
 
-    const handlePopState = () => setLoginPortal(getLoginPortalFromPath());
+    const handlePopState = () => {
+      const portal = getLoginPortalFromPath();
+      setLoginPortal(portal);
+      if (mode === 'local') setRole(portal);
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -70,7 +74,10 @@ const App: React.FC = () => {
           if (user) {
             const isAdmin = user.app_metadata?.role === 'admin';
             setRole(isAdmin ? 'admin' : 'customer');
-            window.history.replaceState({}, '', isAdmin ? '/admin' : '/customer');
+            const expectedPrefix = isAdmin ? '/admin/' : '/customer/';
+            if (!window.location.pathname.startsWith(expectedPrefix) || window.location.pathname.endsWith('/login')) {
+              window.history.replaceState({}, '', isAdmin ? '/admin/requests' : '/customer/requests');
+            }
             setAuth({ user, isAdmin, isLoading: false, error: '' });
           } else {
             setAuth({ user: null, isAdmin: false, isLoading: false, error: '' });
@@ -106,6 +113,7 @@ const App: React.FC = () => {
 
   const handleRoleChange = (newRole: Role) => {
     setRole(newRole);
+    window.history.pushState({}, '', newRole === 'admin' ? '/admin/requests' : '/customer/book');
   };
 
   const handleResetData = () => {
@@ -152,7 +160,7 @@ const App: React.FC = () => {
           return;
         }
         setRole(isAdmin ? 'admin' : 'customer');
-        window.history.replaceState({}, '', isAdmin ? '/admin' : '/customer');
+        window.history.replaceState({}, '', isAdmin ? '/admin/requests' : '/customer/requests');
         setAuth({ user: data.user, isAdmin, isLoading: false, error: '' });
         setLoginId('');
         setLoginPassword('');
@@ -202,7 +210,7 @@ const App: React.FC = () => {
         return;
       }
       setRole(isAdmin ? 'admin' : 'customer');
-      window.history.replaceState({}, '', isAdmin ? '/admin' : '/customer');
+      window.history.replaceState({}, '', isAdmin ? '/admin/requests' : '/customer/requests');
       setAuth({ user: data.user, isAdmin, isLoading: false, error: '' });
       setLoginPassword('');
     } catch (err) {

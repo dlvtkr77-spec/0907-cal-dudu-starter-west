@@ -13,6 +13,17 @@ describe('OperationManager', () => {
   });
 
   describe('submitRequest', () => {
+    it('stores an optional booking note', async () => {
+      const result = await om.submitRequest('C01', ['2026-09-09:am'], 'note-op', '조용한 상담을 원합니다.');
+      expect(result.success).toBe(true);
+      expect(db.getRequest(result.requestId!)?.note).toBe('조용한 상담을 원합니다.');
+    });
+
+    it('rejects a booking note longer than 500 characters', async () => {
+      const result = await om.submitRequest('C01', ['2026-09-09:am'], 'long-note-op', '가'.repeat(501));
+      expect(result.success).toBe(false);
+    });
+
     it('should create a request with selected slots', async () => {
       const result = await om.submitRequest('C01', ['2026-09-09:am', '2026-09-09:pm'], 'op-1');
 
@@ -228,6 +239,41 @@ describe('OperationManager', () => {
       const c02_req2_final = db.getRequest(c02_r2.requestId!);
       expect(c02_req2_final?.status).toBe('confirmed');
       expect(c02_req2_final?.confirmedSlotId).toBe('2026-09-10:am');
+    });
+  });
+
+  describe('cancellation', () => {
+    it('keeps the slot occupied until an admin approves cancellation', async () => {
+      const submitted = await om.submitRequest('C01', ['2026-09-09:am'], 'cancel-submit');
+      await om.confirmRequest(submitted.requestId!, '2026-09-09:am', 'ADMIN', 'cancel-confirm');
+
+      const requested = await om.requestCancellation('C01', submitted.requestId!, 'cancel-request');
+      expect(requested.success).toBe(true);
+      expect(db.getRequest(submitted.requestId!)?.status).toBe('cancellation_requested');
+      expect(db.getSlot('2026-09-09:am')?.status).toBe('confirmed');
+
+      const approved = await om.resolveCancellation(submitted.requestId!, 'ADMIN', true, 'cancel-approve');
+      expect(approved.success).toBe(true);
+      expect(db.getRequest(submitted.requestId!)?.status).toBe('cancelled');
+      expect(db.getSlot('2026-09-09:am')?.status).toBe('available');
+    });
+
+    it('restores confirmed status when an admin rejects cancellation', async () => {
+      const submitted = await om.submitRequest('C01', ['2026-09-09:pm'], 'reject-submit');
+      await om.confirmRequest(submitted.requestId!, '2026-09-09:pm', 'ADMIN', 'reject-confirm');
+      await om.requestCancellation('C01', submitted.requestId!, 'reject-request');
+
+      const rejected = await om.resolveCancellation(submitted.requestId!, 'ADMIN', false, 'cancel-reject');
+      expect(rejected.success).toBe(true);
+      expect(db.getRequest(submitted.requestId!)?.status).toBe('confirmed');
+      expect(db.getSlot('2026-09-09:pm')?.status).toBe('confirmed');
+    });
+
+    it('rejects cancellation by a different customer', async () => {
+      const submitted = await om.submitRequest('C01', ['2026-09-10:am'], 'owner-submit');
+      await om.confirmRequest(submitted.requestId!, '2026-09-10:am', 'ADMIN', 'owner-confirm');
+      const result = await om.requestCancellation('C02', submitted.requestId!, 'owner-cancel');
+      expect(result.success).toBe(false);
     });
   });
 });

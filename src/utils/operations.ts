@@ -10,11 +10,51 @@ export class OperationManager {
     this.db = db;
   }
 
+  async requestCancellation(customerId: string, requestId: string, operationId: string) {
+    const cached = this.db.checkIdempotency(operationId);
+    if (cached.isDuplicate) return cached.cached as { success: boolean; error?: string };
+    let result: { success: boolean; error?: string };
+    const request = this.db.getRequest(requestId);
+    if (!request || request.customerId !== customerId) result = { success: false, error: 'Not request owner' };
+    else if (request.status !== 'confirmed') result = { success: false, error: 'Only confirmed reservation can be cancelled' };
+    else {
+      this.db.updateRequest(requestId, { status: 'cancellation_requested' });
+      this.db.addLog({ timestamp: new Date().toISOString(), action: 'request_cancel', requestId, status: 'success' });
+      result = { success: true };
+    }
+    this.db.recordOperation(operationId, result, result.error);
+    return result;
+  }
+
+  async resolveCancellation(requestId: string, adminId: string, approve: boolean, operationId: string) {
+    const cached = this.db.checkIdempotency(operationId);
+    if (cached.isDuplicate) return cached.cached as { success: boolean; error?: string };
+    let result: { success: boolean; error?: string };
+    const request = this.db.getRequest(requestId);
+    if (!request || request.status !== 'cancellation_requested' || !request.confirmedSlotId) {
+      result = { success: false, error: 'Cancellation request not found' };
+    } else {
+      this.db.beginTransaction();
+      if (approve) {
+        this.db.updateSlot(request.confirmedSlotId, { status: 'available', confirmedAt: undefined, confirmedBy: undefined });
+        this.db.updateRequest(requestId, { status: 'cancelled' });
+      } else {
+        this.db.updateRequest(requestId, { status: 'confirmed' });
+      }
+      this.db.commitTransaction();
+      this.db.addLog({ timestamp: new Date().toISOString(), action: approve ? 'approve_cancel' : 'reject_cancel', requestId, adminId, slotId: request.confirmedSlotId, status: 'success' });
+      result = { success: true };
+    }
+    this.db.recordOperation(operationId, result, result.error);
+    return result;
+  }
+
   // 신청 제출 (고객이 슬롯을 선택하고 제출)
   async submitRequest(
     customerId: string,
     selectedSlotIds: string[],
-    operationId: string
+    operationId: string,
+    note = ''
   ): Promise<{
     success: boolean;
     requestId?: string;
@@ -31,6 +71,12 @@ export class OperationManager {
     let logError: string | undefined;
 
     try {
+      if (note.length > 500) {
+        logError = '메모는 500자 이하로 입력하세요';
+        result = { success: false, error: logError };
+        return result;
+      }
+
       // 검증
       const validation = validateSubmission(selectedSlotIds, this.db.getState().slots);
       if (!validation.valid) {
@@ -53,7 +99,7 @@ export class OperationManager {
       }
 
       // 요청 생성
-      const request = this.db.createRequest(customerId);
+      const request = this.db.createRequest(customerId, note);
       if (!request) {
         logError = 'Failed to create request';
         result = { success: false, error: logError };

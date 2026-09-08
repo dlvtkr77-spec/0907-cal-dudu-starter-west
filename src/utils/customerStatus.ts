@@ -7,6 +7,12 @@ export interface CustomerStatusGuide {
 }
 
 export function getCustomerStatusGuide(status: Request['status']): CustomerStatusGuide {
+  if (status === 'cancellation_requested') {
+    return { heading: '취소 요청을 확인하고 있습니다', description: '관리자가 취소 요청을 검토 중이며 아직 예약은 확정 상태입니다.', nextAction: '승인 또는 거절 결과를 기다려주세요.' };
+  }
+  if (status === 'cancelled') {
+    return { heading: '예약이 취소되었습니다', description: '취소가 승인되어 해당 시간이 다시 열렸습니다.', nextAction: '필요하면 새로운 예약을 신청할 수 있습니다.' };
+  }
   if (status === 'confirmed') {
     return {
       heading: '예약이 확정되었습니다',
